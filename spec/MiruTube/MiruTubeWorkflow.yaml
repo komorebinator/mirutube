@@ -1,4 +1,6 @@
 description: How work is done on MiruTube. The maintainer works on `experimental`, runs the server from the working tree against a real library and looks at it in a browser, and brings what was tried to `main` by pull request; a GitHub Release names a version of `main`, and publishing it builds the image every installed MiruTube updates itself to.
+tracker:
+  type: "@GitHub"
 extends: "@DuckWorkflow"
 main_branch: main
 versioning:
