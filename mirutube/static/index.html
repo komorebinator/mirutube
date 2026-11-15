@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#6d28d9">
+<meta name="color-scheme" content="dark">
+<title>MiruTube</title>
+<link rel="icon" href="/static/icons/mark.svg" type="image/svg+xml">
+<link rel="icon" href="/static/icons/icon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="/static/icons/icon-180.png">
+<link rel="manifest" href="/static/manifest.webmanifest">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header id="top-bar" class="top">
+  <a href="/" id="logo" class="logo" aria-label="MiruTube">
+    <img src="/static/icons/mark.svg" class="logo-mark" width="30" height="30" alt="">
+    <span class="logo-name"><span class="logo-miru">Miru</span>Tube</span>
+  </a>
+  <div id="search-wrap" class="search-wrap">
+    <input id="search" type="search" placeholder="Search" autocomplete="off" aria-label="Search by title"
+           aria-controls="search-results" aria-expanded="false">
+    <ul id="search-results" class="search-results" hidden></ul>
+  </div>
+  <div class="top-end">
+    <span id="address" class="address" title="Open this address on another device" hidden></span>
+    <div class="popover-wrap">
+      <button id="qr-button" class="icon-button" type="button" aria-label="Connect a device" title="Connect a device"
+              aria-haspopup="dialog" aria-expanded="false" hidden>
+        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor"
+             stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/>
+          <rect x="3" y="14" width="7" height="7" rx="1.5"/><path d="M14 14h3v3h-3zM20 14v.01M14 20h.01M17 20h4v-3"/>
+        </svg>
+      </button>
+      <div id="qr-card" class="qr-card" role="dialog" aria-label="Connect a device" hidden>
+        <p class="qr-heading">Scan to open MiruTube on a phone or a TV</p>
+        <img id="qr-image" class="qr-image" alt="QR code of the address" width="240" height="240">
+        <p id="qr-address" class="qr-address"></p>
+      </div>
+    </div>
+    <button id="install-button" class="icon-button" type="button" aria-label="Install MiruTube as an app"
+            title="Install MiruTube as an app" hidden>
+      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor"
+           stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="4" width="18" height="13" rx="2.5"/><path d="M8 21h8M12 7.5v6M9.5 11l2.5 2.5 2.5-2.5"/>
+      </svg>
+    </button>
+    <button id="resync-button" class="icon-button" type="button" aria-label="Rescan library" title="Rescan library">
+      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor"
+           stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M20 11a8 8 0 0 0-14.3-4.9L4 8M4 4v4h4M4 13a8 8 0 0 0 14.3 4.9L20 16M20 20v-4h-4"/>
+      </svg>
+    </button>
+    <a href="/settings" id="settings-button" class="icon-button" aria-label="Settings" title="Settings">
+      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor"
+           stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3"/>
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+      </svg>
+    </a>
+  </div>
+</header>
+
+<div id="install-card" class="overlay" hidden>
+  <section class="overlay-card install-card" role="dialog" aria-modal="true" aria-labelledby="install-title">
+    <button id="install-close" class="icon-button small overlay-close" type="button" aria-label="Close" title="Close">
+      <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor"
+           stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+    </button>
+    <h2 id="install-title">Install MiruTube</h2>
+    <p class="muted">As an app MiruTube opens in a window of its own, with its icon, and without the browser around it.</p>
+    <div id="install-https" class="install-step">
+      <h3><span class="step-number">1</span>Use HTTPS on this device</h3>
+      <p class="muted">A browser installs only a secure site. MiruTube signs its own certificate: install it on this
+        device once, and MiruTube opens here over HTTPS from then on.</p>
+      <a id="certificate-download" class="button primary" href="/mirutube.crt" download="MiruTube.crt">Download certificate</a>
+      <div id="certificate-steps"></div>
+      <details id="certificate-other" class="install-other">
+        <summary>Other devices</summary>
+        <div id="certificate-other-steps"></div>
+      </details>
+      <button id="certificate-open" class="button" type="button">Open over HTTPS</button>
+    </div>
+    <div class="install-step">
+      <h3><span id="install-number" class="step-number">2</span>Install</h3>
+      <div id="install-steps"></div>
+    </div>
+  </section>
+</div>
+
+<main id="home" class="view home">
+  <section id="continue-row" class="continue-panel" hidden>
+    <h2>Continue watching</h2>
+    <div class="row-wrap">
+      <button id="continue-left" class="row-arrow left" type="button" aria-label="Scroll left" hidden>&#x2039;</button>
+      <div id="continue" class="row"></div>
+      <button id="continue-right" class="row-arrow right" type="button" aria-label="Scroll right" hidden>&#x203a;</button>
+    </div>
+  </section>
+  <section class="library">
+    <h2 id="library-heading">Library</h2>
+    <div id="grid" class="grid"></div>
+    <p id="no-results" class="empty" hidden>Nothing found</p>
+  </section>
+</main>
+
+<main id="watch" class="view watch" hidden>
+  <div id="watch-layout" class="watch-layout">
+    <div class="player-col">
+      <div class="player-area">
+      <div class="player-wrap">
+        <video id="player" playsinline preload="metadata" crossorigin="anonymous"></video>
+        <div id="play-flash" class="play-flash" aria-hidden="true">
+          <svg class="icon-play" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13l11-6.5z"/></svg>
+          <svg class="icon-pause" viewBox="0 0 24 24" fill="currentColor"><path d="M7 5h3.5v14H7zM13.5 5H17v14h-3.5z"/></svg>
+        </div>
+        <div id="unplayable" class="unplayable" hidden></div>
+        <div id="elsewhere" class="elsewhere" hidden></div>
+        <div id="countdown" class="countdown" hidden>
+          <p id="countdown-text"></p>
+          <button id="cancel" type="button">Cancel</button>
+        </div>
+      </div>
+      </div>
+      <div class="details">
+        <h1 id="video-title"></h1>
+        <a id="playlist-link" class="playlist-link" hidden></a>
+        <dl id="media-details" class="media-details"></dl>
+      </div>
+    </div>
+    <aside id="playlist-panel" class="playlist" hidden>
+      <h2 id="playlist-title"></h2>
+      <ol id="playlist-items"></ol>
+    </aside>
+  </div>
+</main>
+
+<main id="settings" class="view settings" hidden>
+  <h1>Settings</h1>
+  <section class="panel">
+    <h2>Library folders</h2>
+    <ul id="folders" class="item-list"></ul>
+    <form id="add-folder" class="add-folder">
+      <input id="folder-path" type="text" placeholder="Full path of a folder" aria-label="Full path of a folder"
+             autocomplete="off" spellcheck="false">
+      <button type="submit">Add</button>
+    </form>
+    <p id="folders-local-only" class="muted" hidden>The library folders are changed on the computer MiruTube runs on.</p>
+    <p id="folders-error" class="error" role="alert" hidden></p>
+  </section>
+  <section class="panel">
+    <h2>Install MiruTube</h2>
+    <p id="install-state" class="muted"></p>
+    <button id="install-open" class="button" type="button">How to install</button>
+  </section>
+  <section class="panel">
+    <h2>Removed from the library</h2>
+    <ul id="excluded" class="item-list"></ul>
+    <p id="nothing-removed" class="muted" hidden>Nothing was removed. A video or a folder removed from the library shows here, to bring back.</p>
+  </section>
+</main>
+
+<div id="dialog" class="overlay dialog-backdrop" hidden>
+  <section class="overlay-card dialog-card" role="alertdialog" aria-modal="true" aria-labelledby="dialog-title"></section>
+</div>
+
+<div class="prompts">
+  <button id="tap-for-sound" class="prompt" type="button" hidden>Tap to turn on sound</button>
+</div>
+
+<footer id="now-playing" class="now-playing" data-kind="none">
+  <div class="np-progress">
+    <span id="np-time" class="np-time"></span>
+    <input id="np-seek" class="np-seek" type="range" min="0" max="1" step="any" value="0" aria-label="Seek" disabled>
+    <span id="np-length" class="np-time"></span>
+  </div>
+  <div class="np-row">
+    <a id="np-video" class="np-video">
+      <img id="np-thumb" class="np-thumb" alt="" hidden>
+      <span class="np-text">
+        <span id="np-title" class="np-title">Nothing playing</span>
+        <span id="np-where" class="np-where"></span>
+      </span>
+    </a>
+
+    <div class="np-transport">
+      <button id="np-previous" class="icon-button" type="button" aria-label="Previous video" title="Previous video" disabled>
+        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="currentColor">
+          <path d="M6 5h2v14H6zM20 5.5v13a.5.5 0 0 1-.77.42L9.5 12.42a.5.5 0 0 1 0-.84l9.73-6.5A.5.5 0 0 1 20 5.5z"/>
+        </svg>
+      </button>
+      <button id="np-toggle" class="play-button" type="button" aria-label="Play" title="Play" disabled>
+        <svg class="icon-play" viewBox="0 0 24 24" width="26" height="26" aria-hidden="true" fill="currentColor">
+          <path d="M8 5.6v12.8a.6.6 0 0 0 .92.5l10.1-6.4a.6.6 0 0 0 0-1L8.92 5.1A.6.6 0 0 0 8 5.6z"/>
+        </svg>
+        <svg class="icon-pause" viewBox="0 0 24 24" width="26" height="26" aria-hidden="true" fill="currentColor">
+          <rect x="6.5" y="5" width="4" height="14" rx="1"/><rect x="13.5" y="5" width="4" height="14" rx="1"/>
+        </svg>
+      </button>
+      <button id="np-next" class="icon-button" type="button" aria-label="Next video" title="Next video" disabled>
+        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="currentColor">
+          <path d="M16 5h2v14h-2zM4 5.5v13a.5.5 0 0 0 .77.42l9.73-6.5a.5.5 0 0 0 0-.84L4.77 5.08A.5.5 0 0 0 4 5.5z"/>
+        </svg>
+      </button>
+    </div>
+
+    <div class="np-tools">
+      <div id="subs-menu" class="menu">
+        <button id="subs-button" class="icon-button" type="button" aria-label="Subtitles" title="Subtitles"
+                aria-haspopup="menu" aria-expanded="false" disabled>
+          <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor"
+               stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="2.5" y="5" width="19" height="14" rx="2.5"/><path d="M6.5 12.5h4M13 12.5h4.5M6.5 15.5h7M15.5 15.5h2"/>
+          </svg>
+        </button>
+        <ul id="subs-list" class="menu-list" role="menu" aria-label="Subtitles" hidden></ul>
+      </div>
+      <div id="audio-menu" class="menu">
+        <button id="audio-button" class="icon-button" type="button" aria-label="Audio" title="Audio"
+                aria-haspopup="menu" aria-expanded="false" disabled>
+          <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor"
+               stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 14v-2a9 9 0 0 1 18 0v2"/><rect x="3" y="14" width="4" height="6" rx="1.5"/>
+            <rect x="17" y="14" width="4" height="6" rx="1.5"/>
+          </svg>
+        </button>
+        <ul id="audio-list" class="menu-list" role="menu" aria-label="Audio" hidden></ul>
+      </div>
+      <div class="np-volume">
+        <button id="np-mute" class="icon-button" type="button" aria-label="Mute" title="Volume" disabled>
+          <svg class="icon-sound" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none"
+               stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M11 5 6 9H3v6h3l5 4z" fill="currentColor"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/>
+          </svg>
+          <svg class="icon-muted" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none"
+               stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M11 5 6 9H3v6h3l5 4z" fill="currentColor"/><path d="m16 9 6 6M22 9l-6 6"/>
+          </svg>
+        </button>
+        <input id="np-volume" class="np-volume-slider" type="range" min="0" max="1" step="0.05" value="1"
+               aria-label="Volume" disabled>
+      </div>
+      <div id="speed-menu" class="menu">
+        <button id="speed-button" class="speed-button" type="button" aria-label="Speed" title="Speed"
+                aria-haspopup="menu" aria-expanded="false" disabled>1×</button>
+        <ul id="speed-list" class="menu-list narrow" role="menu" aria-label="Speed" hidden></ul>
+      </div>
+      <div id="devices-menu" class="menu">
+        <button id="devices-button" class="icon-button" type="button" aria-label="Devices" title="Devices"
+                aria-haspopup="menu" aria-expanded="false">
+          <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor"
+               stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="2" y="4" width="15" height="10" rx="1.5"/><path d="M6 18h7M9.5 14v4"/>
+            <rect x="17.5" y="9" width="4.5" height="10" rx="1"/>
+          </svg>
+        </button>
+        <ul id="devices-list" class="menu-list devices-list" role="menu" aria-label="Devices" hidden></ul>
+      </div>
+      <button id="pip-button" class="icon-button" type="button" aria-label="Picture in picture"
+              title="Picture in picture" hidden>
+        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor"
+             stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2.5" y="4.5" width="19" height="15" rx="2.5"/><rect x="12" y="11.5" width="7" height="5" rx="1" fill="currentColor"/>
+        </svg>
+      </button>
+      <button id="fullscreen-button" class="icon-button" type="button" aria-label="Full screen" title="Full screen">
+        <svg class="icon-enter" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none"
+             stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 9V5a1 1 0 0 1 1-1h4M15 4h4a1 1 0 0 1 1 1v4M20 15v4a1 1 0 0 1-1 1h-4M9 20H5a1 1 0 0 1-1-1v-4"/>
+        </svg>
+        <svg class="icon-exit" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none"
+             stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M9 4v4a1 1 0 0 1-1 1H4M20 9h-4a1 1 0 0 1-1-1V4M15 20v-4a1 1 0 0 1 1-1h4M4 15h4a1 1 0 0 1 1 1v4"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+</footer>
+
+<script type="module" src="/static/app.js"></script>
+</body>
+</html>

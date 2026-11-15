@@ -1,0 +1,17 @@
+name: MiruTube
+description: "MiruTube — a video server for the home network: the computer that holds the videos serves them to every other device as a site in the style of a video-hosting service, with series in order, subtitles and dubs found by themselves, videos browsers cannot play converted as they play, and every device able to see and control what plays on the others. Written with duckspec, and its worked example."
+extends: "@DuckspecProject"
+terms_folder: MiruTube
+repository: https://github.com/komorebinator/mirutube
+goals:
+  - Watch any video from one computer's library on any device in the home network, with nothing to install on that device and nothing to copy first
+  - Make sense of folders as people actually name them — series in order, subtitles matched to episodes — without asking anyone to rename a file
+  - Start with one command, on the Python standard library and ffmpeg alone
+uses:
+  - https://github.com/komorebinator/duckspec
+settings:
+  readme: README.md
+workflow:
+  type: "@MiruTubeWorkflow"
+software:
+  - "@MiruTubeApp"

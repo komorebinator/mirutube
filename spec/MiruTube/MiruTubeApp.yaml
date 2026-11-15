@@ -1,0 +1,668 @@
+description: A video server for the home network. It runs on the computer that holds the videos and serves a site in the style of a video-hosting service to every other device on the network — a catalogue of the library folder, search and a player — so a video is watched where it is wanted instead of being copied there first. Every folder is a playlist; a folder of episodes is recognised as a series and played in order, with the subtitles of each episode found without anyone renaming a file.
+extends: "@Application"
+platform: Python
+codestyle:
+  - Python standard library only; ffmpeg and ffprobe are the one external dependency, run as programs
+  - The page is plain HTML, CSS and JavaScript served by the server itself, with no build step
+  - "Runs on Linux, Windows and macOS: paths are compared after os.path.normcase, the cache lives in the platform's own cache folder (`~/.cache` on Linux, `%LOCALAPPDATA%` on Windows, `~/Library/Caches` on macOS), and nothing assumes a Linux device file exists"
+components:
+  - id: library
+    type: Python module
+    src: mirutube/library.py
+    description: Turns the library folder into the catalogue — playlists, the videos in each in order, and the subtitle tracks of every video. It rescans when a catalogue request finds the last scan older than a few seconds, which is how a video copied into the folder appears without a restart (behaviour#new-files).
+    functions:
+      - id: scan
+        description: "Walks every folder of store#fields#library_folders, leaving out the paths in store#fields#excluded; a video's path within the library begins with the name of its library folder, so two folders cannot give two videos one path. Every video and playlist gets a short id, eight letters and digits made from a hash of its path, so the same file has the same id on every scan and the link to it lasts until the file is renamed; two paths whose ids would coincide both get longer ones (decisions#short-ids). Every folder holding videos is a playlist, ordered by order_episodes; a folder whose subfolders are seasons — `Season 1`, `S02`, `Сезон 3` — is one series with a season per subfolder. Any other subfolder with videos inside a series — whether its episodes lie in seasons or directly in its folder — such as `Bonus` or `OVA`, is a playlist of its own titled after both, `Show · Bonus`, so the extras of two series cannot be mistaken for each other. A subfolder counts as a season only when its name says nothing else, so `Show Season 1` beside `Other Season 2` stays two playlists. A folder holding one video is not a playlist: its video is shown on its own, as is a video directly in the library folder. Each video gets its duration and codecs from media#probe, and how it reaches the browser: `direct` when its container is MP4 or WebM, its video H.264 at 8 bits and 4:2:0, VP9 or AV1, and its audio AAC, MP3, Opus or Vorbis — what current Chrome and Firefox both play as it is; `stream` for anything else ffprobe can read (decisions#stream); `unplayable` only for a file ffprobe cannot read, with the reason. `direct` holds for a video's default sound track only: a browser plays a file's first audio stream and cannot switch to another, so with another track chosen — one of its own or an external file — the video is played as `stream`. A video's title is the title stored in the file when it has one that says more than the file's name, else the name cleaned of release tags."
+      - id: order_episodes
+        description: >-
+          Orders the videos of one folder and decides whether it is a series. Each name is normalised first: the extension dropped, dots and underscores read as spaces, bracketed release tags such as `[1080p]`, `(x264)` or `[Group]` removed, a bracketed year kept.
+          The episode number is then taken, in order of trust: an explicit marker — `S01E02`, `1x02`, `E02`, `Ep 2`, `Episode 2`, `Серия 2` — giving the season too where it has one; otherwise the one number whose value differs between the files of the folder while the text before it is the same in all of them — the text after it is often the episode's title — which is what tells the episode in `Show 1080p - 01 [x264]` from the `1080` and the `264`.
+          A folder where most videos have a number is a series, ordered by season and episode; any other folder, and videos left without a number, are ordered by natural sort, `2` before `10`.
+      - id: match_subtitles
+        description: >-
+          Finds the subtitle tracks of every video. Embedded tracks come from media#probe; text tracks are offered, image tracks (PGS, VobSub) are listed as unavailable (decisions#no-ocr).
+          External files — `.srt`, `.vtt`, `.ass`, `.ssa` — are looked for beside the video and in every folder under the series' top folder that holds no videos, at any depth and whatever it is called: releases put them in `Subs`, `RUS Subs` or `[Subtitle]`, with a folder per translator inside, a separate one for signs, and one per group of videos such as `[Subtitle]/OVA`.
+          A file is matched to a video by the first of these that applies: by name, the file's name starting with the video's own; by episode number, read with the rules of order_episodes, and only where the text before the number is the same as in the video's name once case and punctuation are set aside — so `Show.S01E02.Russian.srt` finds `Show - 02 [1080p].mkv`, while `Show - OVA 2.ass` does not find episode 2; and, in a folder with one video, every subtitle file in it whose name does not mark another episode. A file that matches no video is left out rather than shown with the wrong one.
+          A track is labelled by its language — from what follows the video's name (`ru`, `rus`, `Russian`), else from a folder above it (`RUS Subs`) — then by the translator, the nearest folder above it that is not named for subtitles, for signs or after a group of videos, and by `signs` or `forced` where the name or a `signs` or `Надписи` folder says so: `Russian — CafeSubs`, `Russian — Crunchyroll (signs)`. Several translations of one episode are common, and the label is what tells them apart.
+      - id: match_audio
+        description: "Finds the sound tracks of every video: its own audio streams from media#probe, and external sound files — `.mka`, `.ac3`, `.eac3`, `.dts`, `.flac`, `.aac`, `.m4a`, `.mp3`, `.opus` — looked for and matched to videos by the same rules as match_subtitles, since releases lay them out the same way: `[Audio]/STEPonee/Show - 01.STEPonee.mka`, a folder per dub. A track is labelled like a subtitle track — language, then the dub's name from the stream's title or the folder it lies in: `Russian — Dub [DEEP]`, `STEPonee`. The video's first audio stream is its default track."
+  - id: media
+    type: Python module
+    src: mirutube/media.py
+    description: Everything that runs ffprobe or ffmpeg. Results are cached in the cache folder, keyed by the file's path, size and modification time, so each is computed once and again only when the file changes.
+    functions:
+      - id: probe
+        description: Duration, codecs, and the audio and subtitle streams with their languages and titles, of one file, from ffprobe
+      - id: thumbnail
+        description: A frame from a tenth of the way into the video, as JPEG — the first frame of most videos is black or a title card
+      - id: subtitles_vtt
+        description: One subtitle track converted to WebVTT, the only format a browser's player reads. An external file is decoded as UTF-8, else as cp1251, else as latin-1 (behaviour#readable-subtitles).
+      - id: stream_plan
+        description: "How a `stream` video is cut into pieces: its duration, the start of each piece, and the MIME type the page gives Media Source Extensions. Pieces are about ten seconds long. Where the video is copied they start at the source's keyframes, the only places a copied stream can be cut; where it is transcoded they start every ten seconds, with a keyframe forced at each start."
+      - id: stream_segment
+        description: "One piece of a `stream` video as fragmented MP4 that continues the one before it in time, with H.264 video and AAC sound from the chosen track — one of the file's own audio streams, or an external file from library#functions#match_audio read alongside it from the same moment. The video is the source's own when a browser decodes it and only the container or the sound is the problem, as with H.264 and E-AC3 in MKV; otherwise it is transcoded — by the first hardware encoder ffmpeg can open on this computer — NVENC, then VAAPI on each render device in turn (Linux), then QSV, AMF (AMD on Windows) and VideoToolbox (macOS) — else by libx264. NVENC comes first because a computer with an NVIDIA card often has another GPU too, and VAAPI on the first render device may be that other one; the one chosen is written to the server's log at start, so it is plain what the server runs on. A piece is made when it is asked for and not kept: making one takes a fraction of its own length."
+  - id: store
+    type: SQLite database
+    src: mirutube/store.py
+    description: What the server remembers between runs, in `mirutube.db` in server#fields#data_folder (decisions#sqlite). Keyed by a video's path within the library, so it survives a rescan.
+    fields:
+      - id: positions
+        description: per video, the second watching stopped at, whether it was watched to the end, and when it was last written — the order of the continue_row on home
+      - id: subtitle_choice
+        description: per playlist, the label and the language of the subtitle track last chosen, or none
+      - id: audio_choice
+        description: per playlist, the label and the language of the sound track last chosen, or none for the default
+      - id: library_folders
+        description: the folders the library is made of, in the order added; the folder given on the command line is added on the first start
+      - id: excluded
+        description: the videos and folders removed from the library, by path; scan leaves them out until settings brings them back
+  - id: server
+    type: Python HTTP server, one thread per request
+    src: mirutube/server.py
+    description: "Started with `python -m mirutube`, needing no arguments: what it remembers and its certificates are in data_folder, what can be made again in cache_folder, and how it serves — the port, the address it listens on, a certificate and key of its own — is read from config_file, each overridable on the command line; with none of them it listens on every interface on port 8800. A library folder given on the command line is added to the library folders on the first start; after that they are changed in settings. It answers HTTPS and plain HTTP on the same port — a connection that opens with a TLS handshake gets HTTPS, any other plain HTTP — with the certificate from certificates, or with a certificate and key it is given (decisions#own-ca). Serves the page at the address of every view, the catalogue as JSON, videos, thumbnails and subtitles, and records positions and the subtitle and sound choices in store. A request names a video or a playlist by its id from library#functions#scan; an id not in the catalogue is refused, so no request can name a file outside the library (behaviour#library-only)."
+    functions:
+      - id: serve_video
+        description: Sends a video file, answering an HTTP Range request with just the bytes asked for. The player seeks by asking for the bytes at the new position, so without Range a seek waits for everything before it to download.
+      - id: serve_stream
+        description: Answers the page's requests for a `stream` video, and for any video played with a sound track other than its default — its plan from media#stream_plan, then its pieces from media#stream_segment. At most two ffmpeg processes run for one viewer, and one still making a piece nobody waits for any more is stopped, so seeking around a long video does not pile up work.
+      - id: serve_events
+        description: The stream of events each open page keeps with the server (Server-Sent Events, decisions#events). A page opens it with its device's id and name and is a device from then until the connection closes, and for a few seconds after, so a reload does not drop it from the list. Every change to the devices — one appearing or going, what one plays, its position, a pause — is sent to every page at once, and a command for a device is sent to that device alone.
+      - id: control
+        description: "Takes a page's report of what its device plays — the video, the sound and subtitle tracks, the position, playing or paused — and a page's command for any device: play, pause, seek, previous, next, volume, speed, sound track, subtitles, stop — which leaves the video for home — and play a video from a position, which is how playback moves from one device to another (behaviour#devices)."
+      - id: settings
+        description: Reads and changes the library folders and the removed paths, forgets the positions of a playlist or a video, and rescans on request. The library folders are changed only from the computer MiruTube runs on (decisions#settings-local); removing a video, bringing one back and forgetting positions work from any device, since none of them reaches a file outside the library.
+      - id: serve_address
+        description: The address of this computer on the home network and the port, as other devices reach it — the address of the interface the default route leaves by — and the QR code of it as SVG, made by MiruTube's own code (decisions#own-qr).
+      - id: serve_certificate
+        description: Sends the certificate of MiruTube's authority from certificates — never its key — as a file a phone, a computer or a TV offers to install, over plain HTTP too, since a device without it cannot open HTTPS yet.
+    fields:
+      - id: devices
+        description: "the devices connected now, kept in memory and never written down: per device its id, name, and what it plays — the video, the tracks, the position and when it was reported, playing or paused, its volume, whether it is muted, and its speed"
+      - id: data_folder
+        description: "what MiruTube keeps — store's `mirutube.db` and the authority and server certificate of certificates — in the platform's data folder: `$XDG_DATA_HOME/mirutube`, by default `~/.local/share/mirutube`, on Linux, `%APPDATA%\\MiruTube` on Windows, `~/Library/Application Support/MiruTube` on macOS; `--data` names another. Not the cache folder: losing it loses every position, and the authority every device trusts. A store an earlier version kept in the cache folder is moved here on the first start."
+      - id: cache_folder
+        description: "what can be made again — media's probes, thumbnails and converted subtitles — in the platform's cache folder: `$XDG_CACHE_HOME/mirutube`, by default `~/.cache/mirutube`, on Linux, `%LOCALAPPDATA%\\MiruTube` on Windows, `~/Library/Caches/MiruTube` on macOS; `--cache` names another"
+      - id: config_file
+        description: "how the server serves, in INI form under `[server]` — `port`, `host`, `cert`, `key`, and `data` and `cache` to move those folders — at `$XDG_CONFIG_HOME/mirutube/mirutube.conf`, by default `~/.config/mirutube/mirutube.conf`, on Linux, beside the data folder elsewhere; `--config` names another. It may be missing, and so may any key: a key missing has its default, and an option on the command line wins over the file."
+      - id: host_root
+        description: "`MIRUTUBE_HOST_ROOT`: the folder the computer's file system is mounted at when MiruTube runs in service's container, `/host`; unset when it runs directly, and then `/`. Library folders are kept and shown as the computer names them — `/mnt/media/Series` — and opened under it, so a folder is added in settings by the path its owner knows, wherever MiruTube runs."
+  - id: qr
+    type: Python module
+    src: mirutube/qr.py
+    description: "A QR encoder of MiruTube's own (decisions#own-qr): byte mode, error correction H, the smallest version the text fits, Reed–Solomon codes, interleaving and the mask the standard's penalty rules choose; and the drawing of a code as SVG in the style top_bar#components#qr_button describes, with the mark in a cleared square in the middle."
+  - id: certificates
+    type: Python module
+    src: mirutube/certificates.py
+    description: "MiruTube's own certificate authority (decisions#own-ca), made with Python's standard library alone: ECDSA keys on the P-256 curve, and X.509 certificates written out in DER and PEM by its own code. The authority is limited by name constraints to the private address ranges, `localhost` and `.local` names, so it cannot vouch for any site on the internet."
+    functions:
+      - id: authority
+        description: "The authority's key and certificate: read from server#fields#data_folder, or made there on the first start, valid for twenty years and named `MiruTube on <computer name>`; the key file is readable by its owner alone."
+      - id: server_certificate
+        description: A certificate the authority signs for this computer's addresses — its addresses on the home network, `<name>.local`, `localhost`, `127.0.0.1` and `::1`, and nothing outside the authority's name constraints, since one such name makes a device refuse the whole certificate — kept beside the authority and made again when the addresses change or it has less than a month left of its year, so a device that installed the authority once trusts every one of them.
+    fields:
+  - id: page
+    type: "@UserInterface"
+    src: mirutube/static/
+    description: "The site, in the style of a video-hosting service — top_bar on every page, and under it home or watch — on a background kept almost black but not flat — a faint violet glow and blurred, translucent bars — with violet as the accent colour: the logo, the watched bars, the current video in a playlist. It reports the position to server every few seconds while a video plays, and on pause. Every view has a short address of its own that can be bookmarked or sent to another device — `/` for home, `/playlist/<id>` for home narrowed to one playlist, `/watch/<id>`, `/settings` — with the ids of library#functions#scan (behaviour#short-links). A page opened over plain HTTP at the network address asks the same server over HTTPS, quietly; when that succeeds, the device trusts MiruTube's certificate, and the page opens the same view over HTTPS instead (behaviour#secure-at-home). Nothing is shown when it does not: plain HTTP works, and install_card says what HTTPS would add."
+    fields:
+      - id: catalogue
+        description: the catalogue as server last returned it — playlists, their videos in order, positions
+      - id: query
+        type: string
+        default: "''"
+        description: the text in the search box
+      - id: device
+        description: "this page's device: an id made once per tab and kept for the tab's life, so a reload keeps the device and two tabs are two devices, and a name shared by the whole browser — `Chrome on Linux` until the user renames it — kept in the browser's own storage"
+      - id: devices
+        description: the devices as server last sent them, this one among them
+    components:
+      - id: top_bar
+        type: "@UserInterfaceElement"
+        description: A bar across the top of every page that stays in place while the page scrolls.
+        components:
+          - id: logo
+            type: "@UserInterfaceElement"
+            label: MiruTube
+            description: "At the left end; opens home. The mark — a flat violet folder, on no tile, with a white sakura on it, five notched petals around a pink heart: every folder is a playlist, and the flower is what makes it MiruTube's — then the name in bold with `Miru` in the accent colour. The same mark, from page#components#icons, is the favicon and the installed app's icon."
+          - id: search
+            type: "@UserInterfaceElement"
+            placeholder: Search
+            description: "In the middle, as wide as the bar allows up to about 600px. On home it filters the grid by title as the user types. On watch it never leaves the page while the user types, so the video keeps playing: the matching playlists and videos drop down under the box, choosing one opens it, and `Enter` opens home with the query in place."
+          - id: address
+            type: "@UserInterfaceElement"
+            description: "Near the right end of the bar, in small muted type: the address other devices open this MiruTube at, `http://192.168.31.5:8800` — the server's address on the home network, from server#functions#serve_address, never `localhost`. It is the plain HTTP address, which every device can open; a device that trusts MiruTube's certificate goes on to HTTPS from there by itself (behaviour#secure-at-home)."
+          - id: qr_button
+            type: "@UserInterfaceElement"
+            label: Connect a device
+            description: "An icon button beside address opening a card with that address as a QR code to scan with a phone or a TV, and the address in text under it. The code is drawn to match the site rather than in black and white: rounded dots in a deep violet gradient on a soft light card with rounded corners, lightly rounded finder squares, the mark in its middle — dark on light, the way every reader expects, so any phone camera reads it; made with the highest error correction so the mark costs nothing."
+          - id: install_button
+            type: "@UserInterfaceElement"
+            label: Install
+            description: An icon button beside qr_button, there on every device until MiruTube is installed there — never inside the installed app, and gone when the browser reports it installed. Where the browser offers to install the site itself (Chromium-based browsers tell the page so), pressing it opens the browser's own install dialog; anywhere else it opens install_card, with what this device needs first (behaviour#installable).
+          - id: resync_button
+            type: "@UserInterfaceElement"
+            label: Rescan library
+            description: An icon button of two circling arrows beside settings_button that rescans the library folders now, instead of waiting for the next catalogue request to find the last scan old; the arrows turn while it scans. It sits with settings because it is about the library, not about what plays.
+          - id: settings_button
+            type: "@UserInterfaceElement"
+            label: Settings
+            description: A gear icon at the right end of the bar; opens settings.
+      - id: install_card
+        type: "@UserInterfaceElement"
+        label: Install MiruTube
+        description: "A card centred over the page, opened by install_button where the browser cannot install MiruTube by itself, and from settings: what this device needs to install MiruTube as an app, and how, for the situation it is in. Over plain HTTP at the network address the certificate comes first — a browser installs only a secure site — with a `Download certificate` button for server#functions#serve_certificate, the few steps to install it on the platform the browser runs on (Android, iPhone and iPad, Windows, macOS, Linux with Chrome or with Firefox) shown first and the others folded under them, and `Open over HTTPS`. Once secure, the step that installs: on iPhone and iPad `Share → Add to Home Screen`; in desktop Firefox, which installs no sites, opening MiruTube in Chrome or Edge; in a Chromium-based browser that does not offer it, its menu's install command — the case too when MiruTube is installed already, where the browser offers to open it in the app instead."
+        visible: False
+      - id: confirm_dialog
+        type: "@UserInterfaceElement"
+        description: "MiruTube's own confirmation, in place of the browser's: a card centred over the page, dimmed and blurred behind it, in the style of certificate_card — a short title, a line saying what will happen and what will not, `Cancel`, and the action named on its button, `Remove` or `Forget`, in red when it takes something away. Escape and a click outside cancel; Enter confirms, and the action button has the focus. Every confirmation on the page goes through it, a request that failed is reported in it too, with a single `OK`, and a device's new name is asked for in it, with a text field — the page opens none of the browser's own dialogs."
+        visible: False
+      - id: now_playing
+        type: "@UserInterfaceElement"
+        description: "A bar along the bottom of every page, always there, translucent over the page with a blur behind it, laid out like a typical player: progress across its top edge, the playing video on the left — thumbnail, title and episode, `on Living room TV` — the playback buttons in the middle, and the bar's own tools on the right, in this order: subtitles, sound track, volume, speed, devices, then picture in picture and full screen side by side at the end, the two that change how the video is shown. A menu opened from the bar keeps its entries while the video plays, redrawn only when what it lists changes, so a click on an entry always lands. It is the player's only set of controls, here and on every other device: each of them acts on the device that plays, through server#functions#control, so a phone switches the TV's subtitles as the TV itself would. In full screen it lies over the bottom of the video and stays out of the picture while the video plays: it shows when the pointer moves and hides five seconds after the pointer last moved, wherever the pointer rests, the bar itself included — kept on screen only while the video is paused or one of its menus is open, as web players do; while nothing plays anywhere it shows the video last watched, and play starts it here."
+        components:
+          - id: progress
+            type: "@UserInterfaceElement"
+            description: A thin seek bar along the top edge of the bar in the accent colour, thicker under the pointer, with the time and the length at its ends.
+          - id: transport
+            type: "@UserInterfaceElement"
+            description: "Icon buttons in the middle of the bar: previous video, play and pause — the larger, in a circle — and next video."
+          - id: devices_button
+            type: "@UserInterfaceElement"
+            label: Devices
+            description: "An icon button at the right of the bar opening the list of devices upward from it: each with its name, what it plays and whether it is paused, this one marked `This device` with a rename action. Choosing a device moves playback there — the video goes on there from the same moment with the same tracks, and pauses here."
+          - id: subtitles_menu
+            type: "@UserInterfaceElement"
+            label: Subtitles
+            description: An icon button at the right of the bar opening, upward, the playing video's subtitle tracks by label with `Off` first; the chosen one is checked, and an unavailable one is greyed out with the reason beside it.
+            states:
+              - id: no-tracks
+                when: the playing video has no subtitle track
+                property_changes:
+                  disabled: true
+          - id: audio_menu
+            type: "@UserInterfaceElement"
+            label: Audio
+            description: "An icon button beside subtitles_menu opening the playing video's sound tracks by label, the chosen one checked. Choosing one keeps the position: the video goes on from the same moment with the new sound."
+            states:
+              - id: one-track
+                when: the playing video has one sound track
+                property_changes:
+                  disabled: true
+          - id: volume
+            type: "@UserInterfaceElement"
+            label: Volume
+            description: A speaker icon that mutes and unmutes, with a short slider beside it for the volume of the device that plays.
+          - id: speed
+            type: "@UserInterfaceElement"
+            label: Speed
+            description: A button showing the playback speed, `1×`, opening the speeds from 0.5× to 2×.
+          - id: pip_button
+            type: "@UserInterfaceElement"
+            label: Picture in picture
+            description: An icon button just before fullscreen_button that floats the video in a small window over other apps, and brings it back.
+            visible: false
+            states:
+              - id: playing-here
+                when: the video plays on this device and the browser offers picture in picture
+                property_changes:
+                  visible: true
+          - id: fullscreen_button
+            type: "@UserInterfaceElement"
+            label: Full screen
+            description: An icon button at the right end of the bar, there only on the device the bar acts on — the one that plays, or this one while nothing plays anywhere — and hidden while another device plays, since a browser goes full screen only from a touch on its own page (decisions#fullscreen-here). On watch with the video playing here it puts the video in full screen, with this bar over its bottom; anywhere else it puts the whole page in full screen, so a TV shows MiruTube without the browser around it.
+      - id: icons
+        type: SVG and PNG images
+        description: The mark in the sizes a browser and an installed app ask for — the favicon and 192 and 512 pixel icons with nothing behind the mark, and, where a launcher needs a square, a maskable icon and the 180 pixel one for iOS with the mark on the site's own dark colour and room around it — drawn once as SVG, with the PNGs made from it and kept beside it.
+      - id: manifest
+        type: web app manifest and service worker
+        description: "What lets a browser install MiruTube as an app: the name, the icons, the dark background and violet theme colour, opening without the browser's bar; and a service worker that only makes the site installable, caching nothing, since MiruTube without its server has nothing to show (decisions#own-ca)."
+    views:
+      - id: home
+        description: "Under top_bar, continue_row and then grid, with wide margins at the sides — about 5% of the window — and a heading over each section: `Continue watching` over continue_row, set apart on a slightly lighter rounded panel, and `Library` over grid."
+        components:
+          - id: continue_row
+            type: "@UserInterfaceElement"
+            label: Continue watching
+            description: One row with a card per playlist being watched, and one per video outside any playlist started and not finished, the most recently watched first. A playlist's card shows the video to go on with — the one started and not finished, else the next one not watched after the last watched — titled with the playlist and the episode, `Fullmetal Alchemist Brotherhood · E12`, and opens it at its position; a playlist with nothing left to watch has no card. Episodes of one series do not each take a card of their own (behaviour#resume#scenarios#one-card). When they do not fit it scrolls sideways — by an arrow button at either end, shown while there is more on that side, by the wheel or by touch — and shows no scrollbar.
+            states:
+              - id: nothing-started
+                when: no video in catalogue has a position short of watched
+                property_changes:
+                  visible: false
+              - id: searching
+                when: query is not empty
+                property_changes:
+                  visible: false
+            components:
+              - id: forget_button
+                type: "@UserInterfaceElement"
+                label: Remove from Continue watching
+                description: "A round button in the thumbnail's top-right corner, inset a little from both edges: a crisp × drawn as two lines on a dark translucent disc with a blur behind it and a faint light ring, the size of a fingertip; it fades in while the pointer is over the card and stays on a touch screen. After a confirmation in confirm_dialog it clears the stored positions of the card's playlist — or of its video, outside any — so the card leaves the row and the videos count as not started."
+          - id: grid
+            type: "@UserInterfaceElement"
+            description: Cards in as many columns as fit at about 280px each — one per playlist and one per video outside any (library#functions#scan), playlists first, each group by name.
+            components:
+              - id: card
+                type: "@UserInterfaceElement"
+                description: The thumbnail at 16:9, with the duration in its bottom-right corner over the picture and a bar in the accent colour along its bottom edge for the part watched; under it the title in at most two lines, and for a series `Series · 12 episodes`. Clicking it opens watch — for a playlist at the video to go on with, as continue_row picks it, else at its first video not yet watched.
+                states:
+                  - id: unplayable
+                    when: the video is marked unplayable in catalogue
+                    property_changes:
+                      label: Can't play in the browser
+                components:
+                  - id: remove_button
+                    type: "@UserInterfaceElement"
+                    label: Remove from library
+                    description: "The same round × as continue_row#components#forget_button, in the same corner. After a confirmation in confirm_dialog it removes the video — for a playlist's card, its folder — from the library: nothing is deleted on disk, the path joins store#fields#excluded and settings lists it to bring back."
+              - id: no_results
+                type: "@UserInterfaceElement"
+                label: Nothing found
+                visible: false
+                states:
+                  - id: empty-search
+                    when: query is not empty and no card's title contains it
+                    property_changes:
+                      visible: true
+      - id: watch
+        description: "Under top_bar, two columns — player with its details on the left, about two thirds of the width, and playlist_panel on the right — fitted to the window between top_bar and now_playing, so the page itself never scrolls up and down: the player keeps 16:9 and takes the width and height left after details, the columns share the width in proportion, and playlist_panel is as tall as the left column and scrolls within itself. On a window narrower than about 900px the columns stack, playlist_panel under the details, and there the page scrolls; while playlist_panel is hidden, player and details stand in one centred column, sized the same way, so a single video is not stretched across a wide window."
+        components:
+          - id: player
+            type: "@UserInterfaceElement"
+            description: "The video at 16:9 with no controls drawn on it: a click on it plays or pauses, and everything else is in now_playing (decisions#one-bar). It starts at the stored position. A `direct` video is loaded from server#functions#serve_video; a `stream` one is fed to the same element piece by piece from server#functions#serve_stream through the browser's Media Source Extensions — a few pieces ahead of the playhead, and on a seek the piece at the new position first — so seeking and every control are the same for every video (decisions#stream)."
+            states:
+              - id: unplayable
+                when: the video is marked unplayable in catalogue
+                property_changes:
+                  label: "This video can't be played in the browser: <reason>"
+              - id: elsewhere
+                when: the video on screen is playing on another device
+                property_changes:
+                  label: Playing on <device>
+            components:
+              - id: play_flash
+                type: "@UserInterfaceElement"
+                description: A round dark translucent badge in the middle of the video holding the play or the pause icon, shown when the video starts or pauses on this device — by a click on it, a key, the bar, or another device — and fading out as it grows, in about half a second, the way video sites answer a click.
+                visible: false
+              - id: next_countdown
+                type: "@UserInterfaceElement"
+                label: "Next: <title> in 5"
+                description: Over the player, counting down from 5 and then opening the next video; a Cancel button under the text stops it and leaves the ended video on screen.
+                visible: false
+                states:
+                  - id: ended
+                    when: the video has ended and the playlist has a next one
+                    property_changes:
+                      visible: true
+          - id: details
+            type: "@UserInterfaceElement"
+            description: "Under player — the title in large type, for a series `S1 · E2` before it, and the playlist's name as a link that opens home with grid narrowed to that playlist; under them, where a video site puts the description, what the file is and how it reaches this browser — resolution and frame rate, video codec with profile and bit depth, sound codec and channels, container and size, and the delivery: played as it is, sent in pieces with the video copied and the sound converted, or converted as it plays with the encoder that does it (`h264_vaapi on /dev/dri/renderD128`)."
+          - id: playlist_panel
+            type: "@UserInterfaceElement"
+            description: The playlist's name at the top, then its videos in order, each a small thumbnail with its title and duration beside it — the current one highlighted, the watched ones with a check mark — scrolled so the current one is in view.
+            states:
+              - id: no-playlist
+                when: the video is outside any playlist
+                property_changes:
+                  visible: false
+      - id: settings
+        description: "Under top_bar: the library folders, each with a remove action and a field with an Add button below the list for another folder's path; and what was removed from the library, each with a Bring back action; and an `Install MiruTube` section saying whether this device uses HTTPS and opening install_card. On a device other than the computer MiruTube runs on, the library folders are shown read-only, with a line saying where they can be changed (decisions#settings-local)."
+  - id: image
+    type: Containerfile
+    src: Containerfile
+    description: "The container image MiruTube is installed from (decisions#quadlet): Debian with Python, ffmpeg with every codec and NVENC, and the VAAPI drivers for Intel (`intel-media-va-driver-non-free`) and AMD (Mesa) — Debian rather than Fedora, whose Mesa leaves out H.264 and HEVC encoding — and MiruTube's package, run as `python3 -m mirutube` with the data, cache and config folders where service mounts them. Nothing of NVIDIA's is in it: the driver's own libraries are mounted in when it starts, so they always match the driver of the computer."
+  - id: service
+    type: Quadlet unit
+    src: mirutube.container
+    description: "The one file that installs MiruTube, put in `~/.config/containers/systemd/`: Podman's Quadlet turns it into the user's `mirutube.service`, started with the user's systemd — at boot once lingering is on — and updated by `podman auto-update` from the registry, rolled back when the new image does not start. It runs image with the computer's own network, so the address and its QR code are the computer's and settings knows a request from the computer itself; as the user, with the user's groups, so MiruTube reads and writes what the user can and nothing more, the GPU included through the `render` group — which the user has to be in: started at boot, before anyone logs in, there is no login session to hand the GPU to the user, and without it MiruTube converts on the processor; with the whole file system at server#fields#host_root (decisions#whole-system) and the user's data, cache and config folders as the server's own; and with `/dev/dri`, left out on a computer without it. A computer with an NVIDIA GPU and nvidia-container-toolkit adds the drop-in `nvidia.conf` beside it, which passes the GPU in by CDI; one that tries the next version adds `experimental.conf`, which runs the `experimental` image instead."
+behaviour:
+  - id: resume
+    description: A video continues from where it stopped, on whichever device it is opened next, because the position is kept by the server rather than the browser. A video stopped within its last minute — or its last tenth, when it is shorter than ten minutes — counts as watched and starts from the beginning.
+    scenarios:
+      - id: other-device
+        given: an episode was paused at 12:30 on the laptop
+        when: it is opened on the TV
+        then: it starts at 12:30
+      - id: credits
+        given: a 24-minute episode was stopped 40 seconds before its end
+        when: it is opened again
+        then: it is marked watched and starts from the beginning
+      - id: one-card
+        given: episodes 1 to 4 of a series were watched to the end and episode 5 was stopped at 08:10
+        when: home is opened
+        then: Continue watching has one card for the series, episode 5 at 08:10, and opening the series' card in the grid also goes to episode 5
+  - id: series-order
+    description: The episodes of a series play in the order of their numbers however the files are named, and the next one follows the one that ends. The order a file manager would show is used only when no numbers can be found.
+    scenarios:
+      - id: release-tags
+        given: "a folder with `Show 1080p - 01 [x264].mkv` to `Show 1080p - 12 [x264].mkv`"
+        when: the first episode ends
+        then: episode 2 starts after the countdown, and the playlist lists 1 to 12
+      - id: natural-sort
+        given: "a folder of `ep1.mp4` to `ep10.mp4`"
+        when: it is opened
+        then: ep10 comes after ep9, not after ep1
+  - id: subtitles-found
+    description: Subtitles in the folder of a series reach the episodes they belong to without the user renaming anything, and a subtitle file that cannot be matched is not shown at all, because subtitles from another episode are worse than none.
+    scenarios:
+      - id: by-episode
+        given: "`Show - 02 [1080p].mkv` beside `Subs/Show.S01E02.Russian.srt`"
+        when: episode 2 is opened
+        then: its subtitle menu offers `Russian`
+      - id: translators
+        given: "`Show - 01 [1080p].mkv` with `RUS Subs/CafeSubs/Show - 01 [1080p].ass` and `RUS Subs/Crunchyroll/Show - 01 [1080p].ass`"
+        when: episode 1 is opened
+        then: its subtitle menu offers `Russian — CafeSubs` and `Russian — Crunchyroll`
+      - id: other-group
+        given: "`Show - 01.mkv` and `OVA/Show - OVA 1.mkv`, with `[Subtitle]/OVA/Show - OVA 1.rus.ass`"
+        when: episode 1 is opened
+        then: its subtitle menu offers no track, and the OVA's offers `Russian`
+  - id: subtitles-follow
+    description: "Subtitles switched on stay on for the next video of the same playlist, so they are not chosen again on every episode: the track with the same label — the same translation, signs or not — else a track in the same language that is not signs-only, else none; the choice comes back with the next video that has it."
+    scenarios:
+      - id: next-episode
+        given: Russian subtitles were chosen on episode 1
+        when: episode 2 starts after the countdown
+        then: it plays with Russian subtitles
+  - id: audio-tracks
+    description: "Every sound track of a video can be chosen — its own, and dubs that come as separate files in the series' folder — and the choice stays for the next videos of the same playlist: the track with the same label, else one in the same language, else the default. The default is the file's first track."
+    scenarios:
+      - id: external-dub
+        given: "`Show - 01.mkv` with `[Audio]/STEPonee/Show - 01.STEPonee.mka`"
+        when: episode 1 is opened
+        then: its audio menu offers the file's own track and `STEPonee`, and choosing `STEPonee` goes on from the same moment with that sound
+      - id: next-episode
+        given: the dub `Russian — Dub [DEEP]` was chosen on episode 1
+        when: episode 2 starts after the countdown
+        then: it plays with `Russian — Dub [DEEP]`
+  - id: devices
+    description: "Every open MiruTube page is a device the others see, and any device controls what plays on any other: it sees what each one plays, pauses and resumes it, seeks, skips to the next video, and moves playback from one device to another — the video goes on there from the same moment with the same sound and subtitles, and pauses where it was. A browser does not let a page start sound before the user has touched it, so a device that was never touched starts muted and shows `Tap to turn on sound`; one touched since it was opened starts with sound (decisions#start-muted)."
+    scenarios:
+      - id: move
+        given: episode 5 plays on `Living room TV` at 12:30, and MiruTube is open on `Laptop`
+        when: on the laptop, `Laptop` is chosen in the devices list
+        then: episode 5 goes on on the laptop from 12:30 with the same tracks, and the TV pauses
+      - id: remote
+        given: a video plays on `Living room TV`
+        when: pause is pressed in the now-playing bar on a phone
+        then: the TV pauses within a second, and the bar on every device shows it paused
+      - id: untouched
+        given: MiruTube was opened on the TV and nothing on it was touched since
+        when: playback is moved to the TV
+        then: the video plays there muted with `Tap to turn on sound`, and a tap turns the sound on
+      - id: gone
+        given: a laptop shows in the devices list
+        when: its tab is closed
+        then: it leaves the list within a few seconds on every device
+      - id: remote-tracks
+        given: episode 3 plays on `Living room TV` with Japanese sound and no subtitles
+        when: on a phone, `Russian — Crunchyroll` is chosen in the bar's subtitle menu and the volume is lowered
+        then: the TV shows those subtitles and plays quieter, from the same moment
+  - id: library-control
+    description: "What the library shows is the user's to shape without touching the files: a video or a folder can be removed from it and brought back, a series can be taken out of Continue watching — which forgets its progress — and the library folders are listed and changed in settings. Each removal asks for a confirmation first, and nothing is ever deleted on disk."
+    scenarios:
+      - id: remove-folder
+        given: a folder of screen recordings shows in the library
+        when: its card's × is pressed and the confirmation accepted
+        then: the card goes, the files stay on disk, and settings lists the folder with Bring back
+      - id: forget-series
+        given: a series shows in Continue watching at episode 5
+        when: its × there is pressed and the confirmation accepted
+        then: the card leaves the row, and the series' videos count as not started
+      - id: remote-folders
+        given: settings is opened on a phone
+        when: the library folders are looked at
+        then: they are listed, but adding or removing one is offered only on the computer MiruTube runs on
+  - id: uninterrupted
+    description: "Looking for something else never stops what plays: searching on watch lists what it finds under the box while the video goes on, and only choosing a result leaves the video."
+    scenarios:
+      - id: search-while-watching
+        given: an episode plays on watch
+        when: a title is typed into search
+        then: the matches drop down under the box, and the episode keeps playing with sound until one of them is chosen
+  - id: connect
+    description: "Another device joins without anyone typing an address: the page shows the address it is reached at on the home network, and the same address as a QR code for a phone or a TV to scan."
+    scenarios:
+      - id: scan
+        given: MiruTube is open on the computer it runs on
+        when: Connect a device is pressed and its code is scanned with a phone's camera
+        then: the phone opens MiruTube and shows in the devices list
+  - id: full-screen
+    description: "Full screen means what the moment needs: while a video plays on this device it fills the screen with the video, and the control bar shows over it when the pointer moves and hides again; anywhere else it fills the screen with MiruTube itself, for a TV across the room. It is pressed on the device that is to go full screen: a browser goes full screen only from a touch on its own page, so the button is not offered for another device (decisions#fullscreen-here)."
+    scenarios:
+      - id: video
+        given: an episode plays on the laptop
+        when: full screen is pressed in the bar and the mouse is then left alone for five seconds, the pointer still over the bar
+        then: the episode fills the screen with nothing over it, and the bar comes back when the mouse moves
+      - id: paused
+        given: an episode in full screen
+        when: it is paused
+        then: the bar stays on screen until it plays again
+      - id: interface
+        given: home is open on the TV and nothing plays there
+        when: full screen is pressed
+        then: MiruTube fills the TV's screen without the browser around it
+      - id: elsewhere
+        given: an episode plays on the TV
+        when: the bar is looked at on the phone
+        then: it has no full screen button, while every other control acts on the TV
+  - id: installable
+    description: "MiruTube can be installed as an app with its own icon, opening without the browser's bar, wherever the browser allows installing a site — on the computer it runs on, and on every device that has installed MiruTube's certificate (behaviour#secure-at-home). An Install button in the top bar is there until it is installed: it installs at once where the browser can, and elsewhere says what this device needs first and how to do it, so nobody has to find out why their browser offers nothing."
+    scenarios:
+      - id: on-the-server
+        given: MiruTube is open at `localhost` on the computer it runs on
+        when: the browser's Install command is used
+        then: MiruTube opens in a window of its own with its icon
+      - id: on-a-phone
+        given: an Android phone with MiruTube's certificate installed
+        when: MiruTube is opened by its QR code and Install is pressed in the top bar
+        then: MiruTube is on the home screen with its icon and opens without the browser's bar
+      - id: needs-certificate
+        given: a laptop that opened MiruTube over plain HTTP and never installed the certificate
+        when: Install is pressed in the top bar
+        then: a card says HTTPS comes first, offers the certificate with the steps for this laptop's system, and then how to install
+  - id: secure-at-home
+    description: MiruTube is served over HTTPS on the home network with a certificate it makes itself, so a device that installed MiruTube's certificate once opens it with no `Not secure` warning, and can install it as an app, from then on — even after the computer's address changes. A device without it opens MiruTube over plain HTTP, where everything works, and nothing nags about it; the certificate is offered where it matters, when MiruTube is to be installed.
+    scenarios:
+      - id: trusted
+        given: a phone that installed MiruTube's certificate
+        when: the address under Connect a device is opened on it
+        then: MiruTube opens over HTTPS with no warning
+      - id: not-yet
+        given: a laptop that never installed it
+        when: the same address is opened
+        then: MiruTube opens and works over plain HTTP, with no warning of its own on the page
+      - id: new-address
+        given: the computer got another address on the home network and MiruTube was restarted
+        when: the new address is opened on the phone
+        then: it still opens over HTTPS with no warning
+  - id: short-links
+    description: Every playlist and video has a short address, `/watch/k3f9a2qd`, that can be bookmarked or sent to another device, and it keeps opening the same video after a rescan or a restart, for as long as the file keeps its name.
+    scenarios:
+      - id: sent
+        given: an episode open on the laptop
+        when: its address is opened on the phone
+        then: the phone opens the same episode, at the stored position
+      - id: after-restart
+        given: a bookmarked episode
+        when: MiruTube is restarted and a new video is copied into the library
+        then: the bookmark still opens that episode
+  - id: what-plays
+    description: The page says what a video is and how it reaches the browser — its resolution, codecs and size, and whether it is played as it is, sent with the sound converted, or converted as it plays and by which encoder — so a stutter or a hot fan can be told apart from a slow network.
+    scenarios:
+      - id: converted
+        given: an HEVC 10-bit episode is opened on a computer with an Intel GPU
+        when: the details under the video are read
+        then: they give 1920×1080, HEVC Main 10, FLAC, and `converted as it plays — h264_vaapi on /dev/dri/renderD128`
+  - id: readable-subtitles
+    description: Subtitles never show as garbled text, whatever encoding the file was saved in — Russian subtitle files are often in cp1251 rather than UTF-8.
+    scenarios:
+      - id: cp1251
+        given: a Russian `.srt` saved in cp1251
+        when: its track is chosen
+        then: the subtitles read in Cyrillic
+  - id: library-only
+    description: The server never sends a file from outside the library folders, whatever a request asks for, because it listens on the whole home network and any device there can send it anything.
+    scenarios:
+      - id: dot-dot
+        given: the server is running
+        when: a video is requested by an id that is not in the catalogue, or by a path such as `../../etc/passwd`
+        then: the request is refused and nothing is sent
+  - id: no-black-screen
+    description: Every video ffprobe can read plays in a current browser with picture and sound, and seeks like any other — one the browser cannot decode is converted as it plays (decisions#stream). Only a file that cannot be read at all is marked, on its card and its page, with the reason, instead of opening a player that stays black.
+    scenarios:
+      - id: hevc
+        given: an episode in HEVC at 10 bits with FLAC sound
+        when: it is opened, and then moved to 15:00
+        then: it plays with picture and sound, and plays from 15:00 within a few seconds
+      - id: unreadable
+        given: a video whose recording was cut off before its index was written
+        when: its card is shown
+        then: the card marks it as not playable, and its page says why
+  - id: new-files
+    description: A video copied into the library appears in the catalogue within seconds, without restarting the server.
+    scenarios:
+      - id: copied-in
+        given: the server is running
+        when: a video is copied into the library and the home page is reloaded a few seconds later
+        then: its card is there
+  - id: runs-as-service
+    description: "MiruTube installs on any Linux with Podman from one file, and from then on it is a service of the computer: it starts at boot without anyone logging in, updates itself when a new version is released, converts video on the computer's GPU, and a folder anywhere the user can read — another disk, a USB drive — is added in settings by its usual path."
+    scenarios:
+      - id: boot
+        given: MiruTube installed, with lingering on
+        when: the computer restarts and nobody logs in
+        then: MiruTube answers at its address
+      - id: other-disk
+        given: MiruTube running as the service
+        when: "`/mnt/media/Series` is added in settings"
+        then: its videos appear in the library
+      - id: gpu
+        given: a computer with an AMD GPU
+        when: an HEVC 10-bit episode is played
+        then: its details say it is converted with `h264_vaapi`
+      - id: update
+        given: a new version released
+        when: "`podman auto-update` runs"
+        then: MiruTube restarts on the new version with every position kept
+decisions:
+  - id: stream
+    description: A video the browser plays is sent as it is, with Range; any other is converted as it plays, in pieces, rather than refused.
+    rejected:
+      - sending every file as it is — most of a real anime library is HEVC at 10 bits, or has E-AC3 or FLAC sound, which browsers do not play, so a file that opened as a black screen with sound was the rule rather than the exception
+      - converting every video — work for files the browser plays anyway, and quality lost for nothing
+      - converting a whole file before it plays — minutes of waiting, and a second copy on disk of every episode watched
+      - HLS played by hls.js — the same pieces, but through a JavaScript library the page would have to ship, where Media Source Extensions are built into every current browser
+      - one continuous converted stream — a browser cannot seek in it, and the page would need controls of its own
+  - id: audio-in-pieces
+    description: A sound track other than the default is played by sending the video in pieces with that sound in them, the way a video the browser cannot decode is sent.
+    rejected:
+      - the browser's own switching between a file's audio tracks (`audioTracks`) — Chrome and Firefox keep it behind a flag, so it works for almost no one
+      - a separate `<audio>` element playing the dub beside a silent video — the two drift apart, and every seek and pause has to be repeated on both
+  - id: events
+    description: Devices learn of changes and receive commands through one Server-Sent Events stream per page, and send theirs with ordinary requests.
+    rejected:
+      - asking the server every second — a pause would land up to a second late, and every open tab would keep the server busy for nothing
+      - WebSockets — the standard library has no server for them, and the protocol would have to be written by hand for what one-way events and plain requests already cover
+  - id: start-muted
+    description: A device told to play that the user has not touched starts the video muted and asks for a tap, rather than waiting for one.
+    rejected:
+      - starting with sound regardless — the browser refuses it and the video does not start at all
+      - waiting for a tap before starting — a TV across the room would show a still picture until someone walks up to it
+  - id: settings-local
+    description: The library folders can be changed only from the computer MiruTube runs on — a request from its own address; every other device sees them and nothing more.
+    rejected:
+      - changing them from any device — with no accounts, any device on the network could add `/` as a library folder and read every file on the computer through MiruTube
+      - an admin password — a login for the one setting that needs protecting, on a site that has none elsewhere
+  - id: own-qr
+    description: The QR code is made by MiruTube's own code, in Python on the server, and drawn as SVG.
+    rejected:
+      - a QR library — Python's standard library has none, and MiruTube installs nothing beyond ffmpeg
+      - a QR web service — a home network may have no internet, and the address would leave it
+  - id: own-ca
+    description: MiruTube serves HTTPS with a certificate authority of its own, made on the first start and kept in its data folder (certificates). A device installs the authority's certificate once, and from then on trusts the certificate MiruTube issues for this computer's addresses, which is made again whenever they change. Plain HTTP stays open on the same port, for a device that has not installed it. A certificate and key given on the command line are used instead.
+    rejected:
+      - plain HTTP only — `Not secure` on every device but the server, and no installing as an app anywhere else
+      - a self-signed certificate for the server alone — every device would have to accept it again each time the address changes
+      - a public certificate, such as Let's Encrypt — it needs a domain name and the internet, and a home network may have neither
+      - openssl or the `cryptography` package to make the keys — one more thing to install, and openssl is missing on Windows; ECDSA and X.509 are a few hundred lines of MiruTube's own, as the QR code is (decisions#own-qr)
+      - an authority without name constraints — its key, if taken from the computer, could vouch for any site on the internet to every device that trusts it
+  - id: short-ids
+    description: Videos and playlists are named, in addresses and requests, by eight characters from a hash of their path within the library.
+    rejected:
+      - the path itself — an address several hundred characters long once encoded, and it shows the folder names to anyone it is sent to
+      - a number in scan order — it changes when a file is added, and a bookmark opens another video
+      - a slug from the title — long, and two releases of one show have the same title
+  - id: one-bar
+    description: The video has no controls of its own; now_playing is the player's only control bar, the same on the device that plays and on every other.
+    rejected:
+      - the browser's own controls on the video — they act only on the device that shows them, look different in every browser, and hold no place for MiruTube's track menus or devices
+      - controls on the video and the same again in the bar — two places to look for one thing, and two that can disagree
+  - id: fullscreen-here
+    description: Full screen is pressed on the device that is to go full screen; the bar offers the button only on the device it acts on, and never for another device.
+    rejected:
+      - sending full screen to the device that plays — a browser goes full screen only within moments of a touch on its own page, so the TV refused and showed `Tap for full screen` to someone across the room with the phone in hand
+      - keeping the button for another device and showing it disabled — a control that never works is noise in a bar that is already full
+  - id: no-ocr
+    description: Image subtitle tracks are listed as unavailable, not converted.
+    rejected:
+      - recognising their text (OCR) — a heavy dependency and slow, for tracks that external text subtitles usually exist for
+  - id: sqlite
+    description: Positions and choices are kept in SQLite.
+    rejected:
+      - a JSON file — the server answers requests in parallel, and two positions written at once would lose one
+  - id: no-accounts
+    description: There are no accounts or passwords; positions are shared by everyone in the household.
+    rejected:
+      - an account per person — a home network is trusted, and a login on the TV costs more than separate positions are worth
+  - id: quadlet
+    description: "MiruTube is delivered as a container image run by Podman's Quadlet from one unit file in the user's systemd (service): systemd and Podman install, start, update and remove it, not MiruTube's own code."
+    rejected:
+      - an install script, `curl … | sh` — code from the internet run as it is, with updating and removing left to more of the same
+      - a file that installs itself — the same script, packaged
+      - pipx or PyPI — a package manager on top of the system's, for one service
+      - RPM and DEB packages — a build and a repository per distribution, and layering on Fedora Atomic
+      - "Flatpak — made for desktop apps: no systemd service, and sandboxed from the folders it serves"
+      - AppImage — brings a Python MiruTube does not need, needs FUSE 2, and registers no service
+      - systemd-sysext — needs root and systemd 256, and is untried on Fedora Atomic
+      - Docker and Compose — a daemon and a tool more, where Podman comes with the system
+  - id: whole-system
+    description: "service mounts the computer's whole file system, writable, and runs as the user: a folder is added by its path and works, as it would with MiruTube run directly. The container is how MiruTube is delivered, not a sandbox; what it reads and changes is bounded by the user's own permissions and by MiruTube serving only the library (behaviour#library-only)."
+    rejected:
+      - mounting only the library's folders — every new folder an edit of the unit and a restart
+      - the file system read-only — writing into the library later would mean every user editing the unit, which auto-update does not change
+tests:
+  - id: naming
+    description: orders and matches a set of real-world folder layouts — release-group episodes, `SxxEyy` names, Russian names, names with no marker at all, seasons in subfolders, subtitles beside the videos, in subtitle folders with a folder per translator and one for signs, and in a folder per group such as `[Subtitle]/OVA`, and external dubs in `[Audio]/<dub>` — each with the order and the subtitle and sound matches expected
+    command: python -m unittest tests.test_naming
+    verifies:
+      - behaviour#series-order
+      - behaviour#subtitles-found
+  - id: media
+    description: on videos and subtitle files the test makes with ffmpeg — durations and codecs are read and sorted into direct, stream and unplayable; the pieces of a stream video, made from an HEVC 10-bit file with FLAC sound and from H.264 with E-AC3 in MKV, decode as H.264 and AAC and follow each other in time without a gap, and so do pieces made with a second audio stream and with an external sound file in place of the default; an embedded text track and cp1251 and UTF-8 files come out as readable WebVTT
+    command: python -m unittest tests.test_media
+    verifies:
+      - behaviour#readable-subtitles
+      - behaviour#no-black-screen
+  - id: server
+    description: against a running server on a test library — a Range request returns exactly the bytes asked for, a stream video's plan and a piece from its middle are served, and so is a direct video's plan when another sound track is chosen, an id not in the catalogue and a path outside the library are refused, the ids of videos and playlists are eight characters and the same after a rescan and a restart, the page is served at `/watch/<id>`, `/playlist/<id>` and `/settings`, a position recorded is returned to another client, a file copied in appears after a rescan, the continue list has one entry per playlist at the video to go on with, and two event streams see each other appear, a report from one reach the other, a command reach only the device it names, and a closed one leave the list; a removed video and folder leave the catalogue and come back, forgetting a playlist clears its positions, a change to the library folders from another address is refused, the media details and delivery of a video are served, the address and its QR code — read back by an independent decoder — are served, HTTPS and plain HTTP answer on the same port, a client trusting only MiruTube's authority connects over HTTPS to the server's address, the authority's certificate is served and its key never is, HTTPS works with a certificate and key given, the server starts from its config file with an option on the command line winning over it, a store kept in the cache folder by an earlier version moves to the data folder, and every remote control action reaches only the device it names
+    command: python -m unittest tests.test_server
+    verifies:
+      - behaviour#library-only
+      - behaviour#resume
+      - behaviour#new-files
+      - behaviour#devices
+      - behaviour#library-control
+      - behaviour#connect
+      - behaviour#short-links
+      - behaviour#secure-at-home
+  - id: certificates
+    description: the authority and a server certificate made in a temporary data folder are read back by openssl where it is installed — the chain verifies, the server certificate names the addresses asked for, the authority is a CA limited to private addresses and `.local` names, and a certificate for a public name issued by it is rejected; the authority is made once and kept, its key file readable by its owner alone, and the server certificate is made again for new addresses and kept for the same ones
+    command: python -m unittest tests.test_certificates
+    verifies:
+      - behaviour#secure-at-home
+  - id: container
+    description: "builds image with Podman and runs it as service does, against a test library outside the user's home: the page and a video are served, a folder added in settings by its path on the computer is scanned, what the server keeps is written to the mounted data folder and owned by the user, and ffmpeg in the image has the VAAPI encoders and NVENC; Quadlet, run as a dry run on service and its NVIDIA and experimental drop-ins, makes a user service with the network, user, groups, mounts and devices described"
+    command: python -m unittest tests.test_container
+    verifies:
+      - behaviour#runs-as-service

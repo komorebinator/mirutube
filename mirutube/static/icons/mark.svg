@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="46 64 420 420">
+  <title>MiruTube</title>
+  <!-- a violet folder with a white sakura on it, its heart pink: every folder a playlist -->
+  <path d="M76 132 H204 Q214 132 221 139 L250 168 H436 Q460 168 460 192 V392 Q460 416 436 416 H76 Q52 416 52 392 V156 Q52 132 76 132 Z" fill="#8b5cf6"/>
+  <g transform="translate(256 294) scale(0.94)" fill="#fff">
+    <path d="M0 -12 C 34 -30, 46 -72, 24 -98 L 0 -82 L -24 -98 C -46 -72, -34 -30, 0 -12 Z" transform="rotate(0)"/>
+    <path d="M0 -12 C 34 -30, 46 -72, 24 -98 L 0 -82 L -24 -98 C -46 -72, -34 -30, 0 -12 Z" transform="rotate(72)"/>
+    <path d="M0 -12 C 34 -30, 46 -72, 24 -98 L 0 -82 L -24 -98 C -46 -72, -34 -30, 0 -12 Z" transform="rotate(144)"/>
+    <path d="M0 -12 C 34 -30, 46 -72, 24 -98 L 0 -82 L -24 -98 C -46 -72, -34 -30, 0 -12 Z" transform="rotate(216)"/>
+    <path d="M0 -12 C 34 -30, 46 -72, 24 -98 L 0 -82 L -24 -98 C -46 -72, -34 -30, 0 -12 Z" transform="rotate(288)"/>
+  </g>
+  <g fill="#ec4899">
+    <circle cx="264.82" cy="281.86" r="4.20"/>
+    <circle cx="270.27" cy="298.64" r="4.20"/>
+    <circle cx="256.00" cy="309.00" r="4.20"/>
+    <circle cx="241.73" cy="298.64" r="4.20"/>
+    <circle cx="247.18" cy="281.86" r="4.20"/>
+    <circle cx="256" cy="294" r="6.30"/>
+  </g>
+</svg>

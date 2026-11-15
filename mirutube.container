@@ -1,0 +1,41 @@
+# MiruTube, a video server for the home network.
+#
+# Install: put this file in ~/.config/containers/systemd/, then
+#   systemctl --user daemon-reload && systemctl --user start mirutube
+#   loginctl enable-linger                      # start at boot, before anyone logs in
+#   systemctl --user enable --now podman-auto-update.timer   # update itself
+# With an NVIDIA GPU and nvidia-container-toolkit, put nvidia.conf in
+# ~/.config/containers/systemd/mirutube.container.d/ as well.
+
+[Unit]
+Description=MiruTube, a video server for the home network
+Documentation=https://github.com/komorebinator/mirutube
+
+[Container]
+Image=ghcr.io/komorebinator/mirutube:latest
+ContainerName=mirutube
+AutoUpdate=registry
+# the computer's own address, so the QR code is the computer's
+Network=host
+# as the user, with the user's groups: what MiruTube reads and writes, the
+# GPU through the render group included, is what the user may
+UserNS=keep-id
+GroupAdd=keep-groups
+# the whole file system, as the computer names it (decisions#whole-system);
+# SELinux labels are left alone rather than every file relabelled
+SecurityLabelDisable=true
+Volume=/:/host:rslave
+Volume=%h/.local/share/mirutube:/data
+Volume=%h/.cache/mirutube:/cache
+Volume=%h/.config/mirutube:/config
+# Intel and AMD GPUs, where there are any
+AddDevice=-/dev/dri
+
+[Service]
+ExecStartPre=/usr/bin/mkdir -p %h/.local/share/mirutube %h/.cache/mirutube %h/.config/mirutube
+Restart=on-failure
+# the first start downloads the image
+TimeoutStartSec=900
+
+[Install]
+WantedBy=default.target
