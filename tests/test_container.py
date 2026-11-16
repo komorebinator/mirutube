@@ -1,8 +1,12 @@
-"""Builds image with Podman and runs it as service does, against a test
-library outside the user's home: the page and a video are served, a folder
+"""Runs image as service does — the one tests/image.py picks: named by
+MIRUTUBE_TEST_IMAGE and checked to be main's, else built from the working
+tree — against a test library outside the user's home: the page and a video
+are served, a folder
 added in settings by its path on the computer is scanned, what the server
-keeps is written to the mounted data folder and owned by the user, and ffmpeg
-in the image has the VAAPI encoders and NVENC; Quadlet, run as a dry run on
+keeps is written to the mounted data folder and owned by the user, ffmpeg
+in the image has the VAAPI encoders and NVENC, a piece of a video is
+transcoded on this computer's GPU, libtorrent, yt-dlp and Deno are there and
+tests#downloads pass inside the image; Quadlet, run as a dry run on
 service and its NVIDIA and experimental drop-ins, makes a user service with the network, user,
 groups, mounts and devices described (behaviour#runs-as-service).
 
@@ -21,10 +25,9 @@ import unittest
 import uuid
 
 from mirutube.library import short_ids
+from tests.image import ROOT, gpu_options, image_under_test, run_mirutube
 from tests.test_media import ffmpeg
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-IMAGE = "localhost/mirutube:test"
 QUADLET = ["/usr/libexec/podman/quadlet", "/usr/lib/podman/quadlet",
            "/usr/lib/systemd/user-generators/podman-user-generator"]
 
@@ -47,9 +50,7 @@ def I(path):
 class Container(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        build = podman("build", "-t", IMAGE, ROOT, check=False)
-        if build.returncode:
-            raise RuntimeError("the image did not build:\n" + build.stdout[-3000:] + build.stderr[-3000:])
+        cls.image = image_under_test()
         # outside the user's home, as a second disk would be
         cls.tmp = tempfile.mkdtemp(prefix="mirutube-container-", dir="/tmp")
         cls.lib = os.path.join(cls.tmp, "media", "Series")
@@ -57,32 +58,17 @@ class Container(unittest.TestCase):
         for n in (1, 2):
             ffmpeg("-f", "lavfi", "-i", "color=c=blue:size=64x36:rate=5:duration=4", "-c:v", "libx264",
                    "-preset", "ultrafast", "-pix_fmt", "yuv420p", os.path.join(cls.lib, "Series - %02d.mp4" % n))
+        # converted as it plays: MPEG-4 Part 2, which no browser decodes
+        cls.clips = os.path.join(cls.tmp, "media", "Clips")
+        os.makedirs(cls.clips)
+        ffmpeg("-f", "lavfi", "-i", "testsrc=size=320x180:rate=25:duration=12", "-c:v", "mpeg4",
+               os.path.join(cls.clips, "Old.avi"))
         cls.folders = {name: os.path.join(cls.tmp, name) for name in ("data", "cache", "config")}
         for folder in cls.folders.values():
             os.makedirs(folder)
         cls.port = free_port()
         cls.name = "mirutube-test-" + uuid.uuid4().hex[:8]
-        # the options service gives the container (mirutube.container)
-        options = ["--network", "host", "--userns", "keep-id", "--group-add", "keep-groups",
-                   "--security-opt", "label=disable", "-v", "/:/host:rslave",
-                   "-v", cls.folders["data"] + ":/data", "-v", cls.folders["cache"] + ":/cache",
-                   "-v", cls.folders["config"] + ":/config"]
-        if os.path.exists("/dev/dri"):
-            options += ["--device", "/dev/dri"]
-        podman("run", "-d", "--rm", "--name", cls.name, *options, IMAGE,
-               "--port", str(cls.port), "--host", "127.0.0.1")
-        deadline = time.monotonic() + 60
-        while True:
-            try:
-                if cls.request("GET", "/api/ping")[0] == 200:
-                    break
-            except OSError:
-                pass
-            if time.monotonic() > deadline:
-                logs = podman("logs", cls.name, check=False)
-                cls.tearDownClass()
-                raise RuntimeError("the container did not start:\n" + logs.stdout + logs.stderr)
-            time.sleep(0.5)
+        run_mirutube(cls.name, cls.folders, cls.port)
 
     @classmethod
     def tearDownClass(cls):
@@ -107,7 +93,8 @@ class Container(unittest.TestCase):
         # behaviour#runs-as-service#scenarios#other-disk
         status, _, body = self.request("POST", "/api/settings/library-folders", {"action": "add", "folder": self.lib})
         self.assertEqual(status, 200, body)
-        self.assertIn({"name": "Series", "folder": self.lib}, json.loads(body)["library_folders"])
+        self.assertIn({"name": "Series", "folder": self.lib},
+                      [{k: f[k] for k in ("name", "folder")} for f in json.loads(body)["library_folders"]])
         cat = json.loads(self.request("GET", "/api/catalogue")[2])
         episode = I("Series/Series - 01.mp4")
         self.assertIn(episode, cat["videos"])
@@ -144,6 +131,49 @@ class Container(unittest.TestCase):
         encoders = podman("exec", self.name, "ffmpeg", "-hide_banner", "-encoders").stdout
         for name in ("h264_vaapi", "hevc_vaapi", "h264_nvenc", "h264_qsv", "libx264"):
             self.assertIn(name, encoders, name)
+
+    def test_download_tools_are_in_the_image(self):
+        # decisions#libtorrent, decisions#ytdlp-in-image: torrents and links
+        # are taken in the image, as MiruTube runs it
+        run = podman("exec", self.name, "python3", "-c", "import libtorrent; print(libtorrent.__version__)", check=False)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        for tool in ("yt-dlp", "deno"):
+            run = podman("exec", self.name, tool, "--version", check=False)
+            self.assertEqual(run.returncode, 0, tool + ": " + run.stderr)
+
+    def test_transcodes_on_the_gpu(self):
+        # behaviour#runs-as-service#scenarios#gpu: a video no browser decodes is
+        # converted on this computer's GPU, as the server's log says
+        if not gpu_options():
+            self.skipTest("no GPU on this computer")
+        status, _, body = self.request("POST", "/api/settings/library-folders", {"action": "add", "folder": self.clips})
+        self.assertIn(status, (200, 409), body)
+        deadline = time.monotonic() + 60
+        while "converting with" not in (log := podman("logs", self.name, check=False).stdout):
+            self.assertLess(time.monotonic(), deadline, "the server never said what it converts with")
+            time.sleep(0.5)
+        encoder = log.split("converting with", 1)[1].split()[0]
+        self.assertNotEqual(encoder, "libx264", "a GPU is there, and the server converts on the processor")
+        old = I("Clips/Old.avi")
+        status, _, body = self.request("GET", "/stream/" + old)
+        self.assertEqual(status, 200, body)
+        status, _, piece = self.request("GET", "/stream/" + old + "?piece=0")
+        self.assertEqual(status, 200)
+        out = os.path.join(self.tmp, "piece.mp4")
+        with open(out, "wb") as f:
+            f.write(piece)
+        probe = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
+                                "stream=codec_name", "-of", "csv=p=0", out], capture_output=True, text=True)
+        self.assertEqual(probe.stdout.strip(), "h264", probe.stderr)
+
+    def test_downloads_inside_the_image(self):
+        # tests#downloads, where libtorrent and yt-dlp are: in the image
+        run = podman("run", "--rm", "--network", "host", "--entrypoint", "python3",
+                     "-v", ROOT + ":/src:ro", "-w", "/src", "-e", "PYTHONDONTWRITEBYTECODE=1",
+                     "-e", "MIRUTUBE_HOST_ROOT=/", "--security-opt", "label=disable",
+                     self.image, "-W", "ignore", "-m", "unittest", "tests.test_downloads", check=False)
+        self.assertEqual(run.returncode, 0, run.stdout[-3000:] + run.stderr[-5000:])
+        self.assertNotIn("skipped", run.stderr)  # every part ran: the tools are there
 
     def test_vaapi_drivers_are_in_the_image(self):
         listing = podman("exec", self.name, "sh", "-c", "ls /usr/lib/x86_64-linux-gnu/dri/").stdout

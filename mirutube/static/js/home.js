@@ -172,14 +172,61 @@ export function applySearch() {
   updateRowArrows();
 }
 
+// A continue_row card, marked with its video and with what it shows, so a
+// change to the row redraws only the cards that changed.
+const shownAs = (v) => JSON.stringify([v.id, titleInPlaylist(v), v.position || 0, !!v.watched, v.playable]);
+
+function continueCard(v) {
+  const c = videoCard(v, titleInPlaylist(v), "Remove from Continue watching", () => forget(v));
+  c.dataset.id = v.id;
+  c.dataset.shown = shownAs(v);
+  return c;
+}
+
+// continue_row as the catalogue has it — a card per playlist, at the video to
+// go on with, and one per video outside any, the most recently watched first
+// — keeping the cards that did not change, and the row's scroll position.
+let rowWaiting = false;    // a change that waits for the pointer to leave the row
+
+function rowBusy() {
+  return row.matches(":hover") || !$("dialog").hidden;
+}
+
+function drawRow() {
+  const cat = state.catalogue;
+  rowWaiting = false;
+  const kept = new Map([...row.children].map((c) => [c.dataset.id, c]));
+  const cards = cat.continue.filter((id) => cat.videos[id]).map((id) => {
+    const v = cat.videos[id];
+    const c = kept.get(id);
+    return c && c.dataset.shown === shownAs(v) ? c : continueCard(v);
+  });
+  cards.forEach((c, i) => {
+    if (row.children[i] !== c) row.insertBefore(c, row.children[i] || null);
+  });
+  while (row.children.length > cards.length) row.lastElementChild.remove();
+}
+
+// Another device changed the row (behaviour#resume#scenarios#live-row): the
+// cards wait to move while the pointer is over the row or a dialog is open.
+function rowChanged() {
+  if ($("home").hidden || !shownOnce || !state.catalogue) return;
+  if (rowBusy()) {
+    rowWaiting = true;
+    return;
+  }
+  drawRow();
+  applySearch();
+}
+
+listen("continue", rowChanged);
+row.addEventListener("pointerleave", () => { if (rowWaiting) rowChanged(); });
+new MutationObserver(() => { if (rowWaiting) rowChanged(); })
+  .observe($("dialog"), { attributes: true, attributeFilter: ["hidden"] });
+
 function render() {
   const cat = state.catalogue;
-  // a card per playlist, at the video to go on with, and one per video
-  // outside any (the server's `continue`, most recently watched first)
-  $("continue").replaceChildren(...cat.continue.filter((id) => cat.videos[id]).map((id) => {
-    const v = cat.videos[id];
-    return videoCard(v, titleInPlaylist(v), "Remove from Continue watching", () => forget(v));
-  }));
+  drawRow();
   const heading = $("library-heading");
   if (narrowedTo === null) {
     heading.replaceChildren("Library");

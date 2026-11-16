@@ -18,6 +18,7 @@ import { showWatch, leaveWatch } from "./js/watch.js";
 import { showSettings } from "./js/settings.js";
 import { openEvents } from "./js/devices.js";
 import { render as renderBar, closeMenus } from "./js/bar.js";
+import "./js/uploads.js";
 
 const VIEWS = ["home", "watch", "settings"];
 

@@ -1,4 +1,4 @@
-description: How work is done on MiruTube. The maintainer works on `experimental`, runs the server from the working tree against a real library and looks at it in a browser, and brings what was tried to `main` by pull request; a GitHub Release names a version of `main`, and publishing it builds the image every installed MiruTube updates itself to.
+description: "How work is done on MiruTube. The maintainer works on `main`; every push of what goes into the image builds it as `experimental`, which the maintainer's own computer — a Borshevik with a GPU, installed with the experimental drop-in — updates itself to. That image is checked there twice: by the tests run against it, and by the maintainer using it. A GitHub Release then promotes that very image to the version and `latest`, which every installed MiruTube updates itself to; a release never builds an image of its own, so what people receive is what was checked."
 tracker:
   type: "@GitHub"
 extends: "@DuckWorkflow"
@@ -7,22 +7,21 @@ versioning:
   type: "@SemVer"
 release_notes: "@GitHub#recipes#read_release"
 guidelines:
-  - "Never merge into `main` to find out whether something works. `main` is what the next release, and so every installed MiruTube, is made from, so a change is tried in the working tree first: the tests pass, and the author has looked at it in a browser against a real library — nothing else here can say a page looks right or a video plays."
+  - "A release is the image that was checked, never a new build: `experimental` is promoted to the version and `latest` only after check_image passed against it and the maintainer has used it on their own computer and said it works. A rebuild would bring what was never checked — yt-dlp and Debian's packages are fetched anew on every build — so image_promote refuses a release whose commit changes what the image is built from since the commit `experimental` was built from."
+  - Push to `main` only once the tests pass in the working tree, those that build an image from it and run it included (@MiruTubeApp#tests#container, @MiruTubeApp#tests#browser). A push of what goes into the image replaces `experimental` on the maintainer's computer at its next update, so a change that does not start is one the maintainer lives with until the next push.
 branches:
   - id: main
-    description: What releases are made from. Changes reach it only by a merged pull request from `experimental`.
-  - id: experimental
-    description: Where the work is committed and pushed. Pushing here keeps the work off one machine and builds the `experimental` image (experimental_image), which only a computer that chose to try the next version runs; it delivers nothing to anyone else.
+    description: Where the work is committed and pushed, the only branch. A push that changes what the image is built from builds `experimental` (image_build); releases are tags on it.
 channels:
-  - id: releases
+  - id: experimental_image
     from: main
+    description: "`ghcr.io/komorebinator/mirutube:experimental`, built by image_build on every push to `main` that changes what the image is built from, and labelled with the commit it was built from: what the maintainer's computer runs, installed with the drop-in `experimental.conf` beside the unit, and what check_image runs against. The image a release promotes."
+  - id: releases
+    from: experimental_image
     description: GitHub Releases, one per version, each with its release notes — the record of what changed — and with `mirutube.container`, `nvidia.conf` and `experimental.conf` attached, the files MiruTube is installed from.
   - id: image
     from: releases
-    description: "`ghcr.io/komorebinator/mirutube`, the image every installed MiruTube runs, built by image_build when a release is published and tagged with its version and `latest`; `podman auto-update` on each computer follows `latest`."
-  - id: experimental_image
-    from: experimental
-    description: "`ghcr.io/komorebinator/mirutube:experimental`, built by image_build on every push to `experimental`: what a computer trying the next version runs, installed the same way with the drop-in `experimental.conf` beside the unit, so the way MiruTube reaches people — the build, the registry, the update — is what gets tried, not a copy carried over by hand."
+    description: "`ghcr.io/komorebinator/mirutube` tagged with each version and `latest`: the `experimental` image a release names, copied by image_promote without being built again. `podman auto-update` on every installed MiruTube follows `latest`."
 steps:
   - id: requested
     description: A change is wanted — an open issue, read with @GitHub#recipes#read_issue, or a request in the conversation. It is clarified, then written into the terms.
@@ -32,38 +31,47 @@ steps:
     when: the change is present in the terms, verify_project is clean, and the sources do not yet implement it
     operation: "@Software#recipes#build"
   - id: implemented
-    description: The working tree carries the change and the project validates, tests included, but the author has not looked at it running. The server is started from the working tree against the author's library.
-    when: the working tree carries the change, @DuckspecProject#recipes#validate passes, and no server started after the change was last edited is running
-    operation: "@Software#recipes#run"
-  - id: testing_locally
-    description: The server runs the change, and the author looks at it in a browser — the behaviour asked for, and nothing around it broken. Only the author can say it is right.
-    when: a server started after the change was last edited is running, and the author has not yet said it works
+    description: The working tree carries the change and the project validates, every test included — those that build an image from the working tree and run it, in a browser too, among them. Nothing has reached the image yet.
+    when: the working tree carries the change and @DuckspecProject#recipes#validate passes
     operation: "@Git#recipes#commit"
   - id: committed
     description: The change is recorded locally and has reached no one.
     when: local commits carry the change and are not on the remote
-    operation: "@Git#recipes#push(branch=experimental)"
-  - id: on_experimental
-    description: The change is on `experimental`, and in the `experimental` image a test computer updates itself to; more changes may join it there, and it goes to `main` when the author says it should.
-    when: experimental carries the change, main does not, and no pull request into main carries it
-    operation: "@GitHub#recipes#open_pull_request(head=experimental, base=main)"
-  - id: in_review
-    description: A pull request from `experimental` to `main` carries the change; merging it is what delivers it.
-    when: an open pull request into main carries the change
-    operation: "@GitHub#recipes#merge_pull_request(strategy=merge)"
+    operation: "@Git#recipes#push(branch=main)"
   - id: on_main
-    description: The change is on `main`, but no version names it yet, so no installed MiruTube has it.
-    when: main carries the change and its `version` is still the one the latest release tag names
+    description: The change is on `main`, and image_build makes `experimental` from it — or has made it — but nothing has been checked against that image yet.
+    when: main carries the change, and no check_image has passed against an `experimental` labelled with a commit that contains it
+    operation: "@MiruTubeWorkflow#recipes#check_image"
+  - id: image_checked
+    description: check_image passed against the `experimental` image of the change, and the maintainer's computer runs that image. What moves it on is the maintainer using MiruTube there — the behaviour asked for, and nothing around it broken — and saying it works; only the maintainer can say so.
+    when: check_image passed against the `experimental` image of the change, and the maintainer has not yet said it works
+  - id: accepted
+    description: The maintainer has used the `experimental` image of the change and said it works; no version names it yet.
+    when: the maintainer has said the `experimental` image of the change works, and the latest release tag does not contain the change
     operation: "@DuckspecProject#recipes#prepare_release"
   - id: versioned
-    description: A version covering the change is prepared, and its bump has itself travelled the steps above to `main`.
+    description: A version covering the change is prepared and on `main`. The bump changes nothing the image is built from, so it builds no image, and `experimental` is still the image that was checked.
     when: main carries a `version` that no tag names yet
     operation: "@GitHub#recipes#create_release"
   - id: released
-    description: The change is named by a published version, with release notes saying what changed.
-    when: a GitHub Release exists for a version whose tag contains the change
+    description: The change is named by a published version, with release notes saying what changed, and image_promote has copied the `experimental` image that was checked to that version and `latest`, which every installed MiruTube updates itself to.
+    when: a GitHub Release exists for a version whose tag contains the change, and image_promote succeeded for it
 components:
   - id: image_build
     type: GitHub Actions workflow
     src: .github/workflows/image.yml
-    description: "Builds the image from the source and pushes it to `ghcr.io/komorebinator/mirutube`: on every push to `experimental` as `experimental`; on a published release as the release's version and as `latest`, attaching `mirutube.container`, `nvidia.conf` and `experimental.conf` to the release."
+    description: Builds the image from the source on every push to `main` that changes what it is built from — `mirutube/`, `Containerfile`, `image/`, `.containerignore` — labels it with the commit (`org.opencontainers.image.revision`) and pushes it to `ghcr.io/komorebinator/mirutube` as `experimental`. A push that changes nothing of these, a version bump among them, builds nothing, so `experimental` stays the image that was checked.
+  - id: image_promote
+    type: GitHub Actions workflow
+    src: .github/workflows/release.yml
+    description: When a release is published, copies the `experimental` image, by its digest, to the release's version and to `latest`, without building it again, and attaches `mirutube.container`, `nvidia.conf` and `experimental.conf` to the release. It refuses — and the release then has no image — when what the image is built from changed between the commit `experimental` is labelled with and the release's tag, since the image would not be that commit's.
+recipes:
+  - id: check_image
+    description: "Runs the tests that take an image against a built one — by default `ghcr.io/komorebinator/mirutube:experimental` — on the maintainer's computer, where the GPU and Podman are: it is installed as service installs it, transcodes on the GPU, downloads a torrent and a link, and its page is used in a browser as two devices"
+    arguments:
+      - id: image
+        description: the image to check; `ghcr.io/komorebinator/mirutube:experimental` when omitted
+    instructions:
+      - Run `MIRUTUBE_TEST_IMAGE=<image> python3 -m unittest tests.test_container tests.test_browser -v` at the repository's root, with `main` checked out and up to date
+      - The tests pull the image and refuse it, before testing anything, when the commit it is labelled with is not on `main` or what the image is built from changed since — the image would not be `main`'s; image_build may still be running, so wait for it rather than checking an older image
+      - Report each test that failed with its output. A failure is a defect of the change and is fixed by a new change, which builds a new `experimental`; an older image is never promoted in its place

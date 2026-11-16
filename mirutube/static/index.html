@@ -14,16 +14,11 @@
 </head>
 <body>
 <header id="top-bar" class="top">
-  <a href="/" id="logo" class="logo" aria-label="MiruTube">
-    <img src="/static/icons/mark.svg" class="logo-mark" width="30" height="30" alt="">
-    <span class="logo-name"><span class="logo-miru">Miru</span>Tube</span>
-  </a>
-  <div id="search-wrap" class="search-wrap">
-    <input id="search" type="search" placeholder="Search" autocomplete="off" aria-label="Search by title"
-           aria-controls="search-results" aria-expanded="false">
-    <ul id="search-results" class="search-results" hidden></ul>
-  </div>
-  <div class="top-end">
+  <div class="top-start">
+    <a href="/" id="logo" class="logo" aria-label="MiruTube">
+      <img src="/static/icons/mark.svg" class="logo-mark" width="30" height="30" alt="">
+      <span class="logo-name"><span class="logo-miru">Miru</span>Tube</span>
+    </a>
     <span id="address" class="address" title="Open this address on another device" hidden></span>
     <div class="popover-wrap">
       <button id="qr-button" class="icon-button" type="button" aria-label="Connect a device" title="Connect a device"
@@ -40,11 +35,28 @@
         <p id="qr-address" class="qr-address"></p>
       </div>
     </div>
+  </div>
+  <div id="search-wrap" class="search-wrap">
+    <input id="search" type="search" placeholder="Search" autocomplete="off" aria-label="Search by title"
+           aria-controls="search-results" aria-expanded="false">
+    <ul id="search-results" class="search-results" hidden></ul>
+  </div>
+  <div class="top-end">
     <button id="install-button" class="icon-button" type="button" aria-label="Install MiruTube as an app"
             title="Install MiruTube as an app" hidden>
       <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor"
            stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
         <rect x="3" y="4" width="18" height="13" rx="2.5"/><path d="M8 21h8M12 7.5v6M9.5 11l2.5 2.5 2.5-2.5"/>
+      </svg>
+    </button>
+    <button id="upload-button" class="icon-button upload-button" type="button" aria-label="Upload" title="Upload"
+            aria-haspopup="dialog">
+      <svg class="upload-ring" viewBox="0 0 40 40" aria-hidden="true" hidden>
+        <circle class="ring-track" cx="20" cy="20" r="18"/><circle id="upload-ring" class="ring-fill" cx="20" cy="20" r="18"/>
+      </svg>
+      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor"
+           stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 15V4M7.5 8.5 12 4l4.5 4.5M4 14v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/>
       </svg>
     </button>
     <button id="resync-button" class="icon-button" type="button" aria-label="Rescan library" title="Rescan library">
@@ -90,6 +102,49 @@
   </section>
 </div>
 
+<div id="uploads-card" class="overlay" hidden>
+  <section class="overlay-card uploads-card" role="dialog" aria-modal="true" aria-labelledby="uploads-title">
+    <button id="uploads-close" class="icon-button small overlay-close" type="button" aria-label="Close" title="Close">
+      <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor"
+           stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+    </button>
+    <h2 id="uploads-title">Upload</h2>
+    <p class="muted">Videos come into the library from this device, a torrent or a link, and play as soon as each has
+      arrived. Every device sees what is coming.</p>
+    <div class="upload-ways">
+      <div class="upload-way">
+        <h3>From this PC</h3>
+        <div class="upload-buttons">
+          <button id="upload-files" class="button" type="button">Files…</button>
+          <button id="upload-folder" class="button" type="button">Folder…</button>
+        </div>
+        <p class="muted small">Videos, subtitles, sound tracks, a folder or a <code>.torrent</code> — or drop them
+          anywhere on MiruTube.</p>
+        <input id="upload-files-input" type="file" multiple hidden>
+        <input id="upload-folder-input" type="file" webkitdirectory multiple hidden>
+      </div>
+      <form id="upload-link" class="upload-way">
+        <h3>Link</h3>
+        <div class="link-row">
+          <input id="link-input" type="text" placeholder="A video, a playlist, a .torrent or a magnet: link"
+                 aria-label="Link" autocomplete="off" spellcheck="false">
+          <button type="submit" class="button primary">Add</button>
+        </div>
+      </form>
+    </div>
+    <div id="upload-target" class="setting-row" hidden>
+      <label class="setting-name" for="upload-folder-select">Save to</label>
+      <select id="upload-folder-select"></select>
+    </div>
+    <p id="upload-error" class="error" role="alert" hidden></p>
+    <h3 class="jobs-heading">Coming in</h3>
+    <ul id="jobs" class="jobs"></ul>
+    <p id="no-jobs" class="muted small">Nothing is coming in.</p>
+  </section>
+</div>
+
+<div id="drop-zone" class="drop-zone" hidden><div class="drop-zone-text">Drop to upload</div></div>
+
 <main id="home" class="view home">
   <section id="continue-row" class="continue-panel" hidden>
     <h2>Continue watching</h2>
@@ -112,6 +167,10 @@
       <div class="player-area">
       <div class="player-wrap">
         <video id="player" playsinline preload="metadata" crossorigin="anonymous"></video>
+        <div id="subtitle-layer" class="subtitle-layer" aria-live="off">
+          <div id="subtitles-top" class="subtitles-top"></div>
+          <div id="subtitles-bottom" class="subtitles-bottom"></div>
+        </div>
         <div id="play-flash" class="play-flash" aria-hidden="true">
           <svg class="icon-play" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13l11-6.5z"/></svg>
           <svg class="icon-pause" viewBox="0 0 24 24" fill="currentColor"><path d="M7 5h3.5v14H7zM13.5 5H17v14h-3.5z"/></svg>
@@ -151,6 +210,26 @@
     <p id="folders-error" class="error" role="alert" hidden></p>
   </section>
   <section class="panel">
+    <h2>Playback</h2>
+    <div class="setting-row">
+      <div class="setting-text">
+        <div class="setting-name" id="subtitle-size-label">Subtitle size</div>
+        <div class="muted">In proportion to the picture, on every device.</div>
+      </div>
+      <div id="subtitle-size" class="segmented" role="radiogroup" aria-labelledby="subtitle-size-label"></div>
+    </div>
+  </section>
+  <section class="panel">
+    <h2>Downloads</h2>
+    <label class="setting-row" for="seed-torrents">
+      <span class="setting-text">
+        <span class="setting-name">Seed torrents after downloading</span>
+        <span class="muted">Share what was downloaded with others, until Stop seeding. For every device.</span>
+      </span>
+      <input id="seed-torrents" class="switch" type="checkbox" role="switch">
+    </label>
+  </section>
+  <section class="panel">
     <h2>Install MiruTube</h2>
     <p id="install-state" class="muted"></p>
     <button id="install-open" class="button" type="button">How to install</button>
@@ -164,10 +243,6 @@
 
 <div id="dialog" class="overlay dialog-backdrop" hidden>
   <section class="overlay-card dialog-card" role="alertdialog" aria-modal="true" aria-labelledby="dialog-title"></section>
-</div>
-
-<div class="prompts">
-  <button id="tap-for-sound" class="prompt" type="button" hidden>Tap to turn on sound</button>
 </div>
 
 <footer id="now-playing" class="now-playing" data-kind="none">

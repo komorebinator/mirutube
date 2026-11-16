@@ -65,8 +65,10 @@ button:disabled { cursor: default; opacity: 0.4; }
   backdrop-filter: blur(18px) saturate(140%);
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
 }
+/* the left of the bar: the logo, then the address and its QR code */
+.top-start { flex: 1 1 0; display: flex; align-items: center; gap: 6px; min-width: 0; }
 /* logo: the mark, then the name in bold with `Miru` in the accent colour */
-.logo { flex: 1 1 0; display: flex; align-items: center; gap: 9px; min-width: 0; white-space: nowrap; }
+.logo { flex: 0 0 auto; display: flex; align-items: center; gap: 9px; margin-right: 10px; white-space: nowrap; }
 .logo-mark { flex: 0 0 auto; display: block; }
 .logo-name { font-weight: 800; font-size: 21px; letter-spacing: -0.4px; }
 .logo-miru { color: var(--accent-light); }
@@ -94,13 +96,13 @@ button:disabled { cursor: default; opacity: 0.4; }
 .top-end { flex: 1 1 0; min-width: max-content; display: flex; align-items: center; justify-content: flex-end; gap: 4px; }
 /* address: small muted type, the address other devices open */
 .address {
-  min-width: 0; margin-right: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; user-select: all;
 }
 .popover-wrap { position: relative; }
 /* qr_button's card: the code, and the address under it */
 .qr-card {
-  position: absolute; top: calc(100% + 10px); right: 0; z-index: 30; width: 288px;
+  position: absolute; top: calc(100% + 10px); left: 0; z-index: 30; width: 288px;
   padding: 18px 20px 16px; text-align: center;
   background: var(--menu); border: 1px solid var(--line); border-radius: 16px;
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
@@ -108,6 +110,13 @@ button:disabled { cursor: default; opacity: 0.4; }
 .qr-heading { margin: 0 0 12px; color: var(--muted); font-size: 13px; }
 .qr-image { display: block; width: 240px; height: 240px; margin: 0 auto; }
 .qr-address { margin: 12px 0 0; font-weight: 600; word-break: break-all; user-select: all; }
+
+/* upload_button: a ring around it fills with what is coming in */
+.upload-button { position: relative; }
+.upload-ring { position: absolute; inset: 0; width: 100%; height: 100%; transform: rotate(-90deg); pointer-events: none; }
+.upload-ring circle { fill: none; stroke-width: 2.5; }
+.upload-ring .ring-track { stroke: rgba(255, 255, 255, 0.12); }
+.upload-ring .ring-fill { stroke: var(--accent-light); stroke-linecap: round; transition: stroke-dashoffset 0.6s ease-out; }
 
 /* -------------------------------------------------------------------- views */
 
@@ -273,6 +282,28 @@ h2 { font-size: 19px; margin: 16px 0 12px; }
 .item-list li { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid rgba(255, 255, 255, 0.06); }
 .item-list li:last-child { border-bottom: 0; }
 .folder-text { flex: 1 1 auto; min-width: 0; }
+.folder-free { color: var(--muted); font-size: 13px; white-space: nowrap; }
+/* a setting: its name and what it does on the left, its choice on the right */
+.setting-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; padding: 6px 0; }
+.setting-name { font-weight: 600; }
+.setting-text { display: flex; flex-direction: column; gap: 2px; }
+label.setting-row { cursor: pointer; }
+/* an on/off switch: a pill with a knob, violet when on */
+.switch {
+  -webkit-appearance: none; appearance: none; flex: 0 0 auto; position: relative; margin: 0;
+  width: 42px; height: 24px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--line); cursor: pointer;
+  transition: background 0.15s;
+}
+.switch::after {
+  content: ""; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%;
+  background: #fff; transition: transform 0.15s;
+}
+.switch:checked { background: var(--accent); border-color: var(--accent); }
+.switch:checked::after { transform: translateX(18px); }
+.segmented { display: inline-flex; border: 1px solid var(--line); border-radius: 18px; overflow: hidden; }
+.segmented button { border: 0; border-radius: 0; background: none; padding: 7px 12px; font-size: 13px; }
+.segmented button + button { border-left: 1px solid var(--line); }
+.segmented button[aria-checked="true"] { background: var(--accent); color: #fff; font-weight: 600; }
 .folder-path { font-weight: 600; overflow-wrap: anywhere; }
 .folder-name { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
 .add-folder { display: flex; gap: 10px; margin-top: 12px; }
@@ -327,6 +358,50 @@ h2 { font-size: 19px; margin: 16px 0 12px; }
   background: var(--accent-soft); color: var(--accent-light); font-size: 13px; font-weight: 800;
 }
 .install-card h4 { margin: 14px 0 6px; font-size: 14px; color: var(--accent-light); }
+
+/* uploads_card: the two ways in, where to, and everything coming in */
+.uploads-card { width: min(640px, 100%); }
+.uploads-card h3 { margin: 0 0 8px; font-size: 15px; }
+.upload-ways { display: grid; grid-template-columns: 1fr 1.3fr; gap: 14px; }
+.upload-way { padding: 14px; background: var(--surface); border-radius: 14px; }
+.upload-buttons { display: flex; gap: 8px; }
+.upload-way .small, .uploads-card .small { font-size: 13px; margin: 10px 0 0; }
+.link-row { display: flex; gap: 8px; }
+.link-row input {
+  flex: 1 1 auto; min-width: 0; padding: 8px 12px; border-radius: 10px;
+  border: 1px solid var(--line); background: rgba(0, 0, 0, 0.35); color: var(--text); font-size: 14px;
+}
+.link-row input:focus { outline: none; border-color: var(--accent); }
+#upload-target { margin-top: 12px; }
+#upload-folder-select {
+  padding: 7px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); color: var(--text);
+}
+.jobs-heading { margin-top: 18px !important; }
+.jobs { list-style: none; margin: 0; padding: 0; }
+.job { padding: 12px 0; border-top: 1px solid rgba(255, 255, 255, 0.06); }
+.job-head { display: flex; align-items: baseline; gap: 10px; }
+.job-title { flex: 1 1 auto; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.job-state { flex: 0 0 auto; font-size: 12.5px; color: var(--muted); }
+.job-state.failed { color: #ff8a93; }
+.job-into, .job-meta, .job-reason { font-size: 12.5px; color: var(--muted); margin-top: 3px; overflow-wrap: anywhere; }
+.job-reason { color: #ff8a93; }
+.job-bar { height: 4px; margin-top: 8px; border-radius: 2px; background: rgba(255, 255, 255, 0.1); overflow: hidden; }
+.job-bar > div { height: 100%; background: var(--accent); transition: width 0.6s ease-out; }
+.job-actions { display: flex; gap: 8px; margin-top: 8px; }
+.job-actions button { padding: 4px 12px; font-size: 12.5px; border-radius: 14px; }
+@media (max-width: 600px) {
+  .upload-ways { grid-template-columns: 1fr; }
+}
+
+/* drop_zone: over the whole page while files are dragged over it */
+.drop-zone {
+  position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; pointer-events: none;
+  background: rgba(5, 4, 9, 0.7); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+}
+.drop-zone-text {
+  padding: 28px 48px; border: 2px dashed var(--accent-light); border-radius: 20px;
+  font-size: 22px; font-weight: 700; color: var(--text);
+}
 
 /* confirm_dialog: the same card, narrower, its buttons at the bottom right */
 .dialog-backdrop { z-index: 70; }
@@ -406,9 +481,11 @@ input[type="range"]::-moz-range-thumb { width: 13px; height: 13px; border: 0; bo
 
 .np-tools { grid-area: tools; display: flex; align-items: center; justify-content: flex-end; gap: 2px; min-width: 0; }
 .np-volume { display: flex; align-items: center; }
-.np-volume-slider { width: 84px; margin: 0 14px 0 2px; }
-/* the speed pill sits apart from its neighbours, as far as the icons do */
-#speed-menu { margin-right: 8px; }
+/* `input[type="range"]` sets no margin, and wins over a class alone */
+.np-volume .np-volume-slider { width: 84px; margin: 0 2px; }
+/* the speed pill sits apart from its neighbours, as far as the icons do —
+   also where the volume slider is hidden on a narrow window */
+#speed-menu { margin: 0 8px 0 12px; }
 #np-mute .icon-muted, #np-mute.muted .icon-sound { display: none; }
 #np-mute.muted .icon-muted { display: block; }
 .speed-button {
@@ -451,14 +528,25 @@ input[type="range"]::-moz-range-thumb { width: 13px; height: 13px; border: 0; bo
 .devices-list .device-choose:disabled { color: var(--text); }
 .devices-list .device-rename { flex: 0 0 auto; width: auto; margin-right: 8px; padding: 4px 10px; font-size: 12px; border: 1px solid var(--line); border-radius: 14px; }
 
-/* prompts: a tap the browser needs before sound */
-.prompts {
-  position: fixed; left: 50%; bottom: calc(var(--bar-height) + 28px); transform: translateX(-50%); z-index: 40;
-  display: flex; flex-direction: column; align-items: center; gap: 10px;
+/* player#subtitles: drawn over the picture, sized and lifted by subtitles.js
+   (decisions#own-subtitles) */
+.subtitle-layer {
+  position: absolute; z-index: 1; pointer-events: none; overflow: hidden;
+  font-size: 18px; line-height: 1.25; color: #fff; text-align: center;
 }
-.prompt {
-  background: var(--accent); border-color: var(--accent); font-weight: 700; padding: 11px 24px;
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+.subtitles-top, .subtitles-bottom {
+  position: absolute; left: 10%; right: 10%;
+  display: flex; flex-direction: column; align-items: center; gap: 0.1em;
+}
+.subtitles-top { top: 5%; }
+.subtitles-bottom { bottom: 5%; transition: bottom 0.2s ease-out; }
+.subtitle-cue span {
+  white-space: pre-line; font-weight: 600;
+  text-shadow: 0 0 2px #000, 0 0 2px #000, 0 0 3px #000, 0 1px 4px rgba(0, 0, 0, 0.8);
+  -webkit-text-stroke: 0.04em rgba(0, 0, 0, 0.7); paint-order: stroke fill;
+}
+@media (prefers-reduced-motion: reduce) {
+  .subtitles-bottom { transition: none; }
 }
 
 /* -------------------------------------------------------------- full screen */

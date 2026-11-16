@@ -9,7 +9,7 @@ import {
   state, listen, notify, titleInPlaylist, previousOf, nextOf, watchHref, renameDevice, videoOf,
 } from "./state.js";
 import { player, MSE } from "./player.js";
-import { isFullscreen, holdBar } from "./screen.js";
+import { isFullscreen, holdBar, canFullscreen } from "./screen.js";
 import { target, act, moveTo, openEvents } from "./devices.js";
 
 const bar = $("now-playing");
@@ -84,10 +84,10 @@ export function render() {
   $("speed-button").disabled = !active(t);
   $("speed-button").textContent = speedLabel(t.speed || 1);
   $("pip-button").hidden = !(local && document.pictureInPictureEnabled && !player.disablePictureInPicture);
-  // only on the device the bar acts on: another device's browser would not
-  // go full screen without a touch on its own page (decisions#fullscreen-here)
+  // on every device whatever the bar shows, acting on this page alone
+  // (decisions#fullscreen-here); hidden only where it would do nothing
   const full = isFullscreen();
-  $("fullscreen-button").hidden = t.kind === "remote";
+  $("fullscreen-button").hidden = !canFullscreen();
   $("fullscreen-button").classList.toggle("on", full);
   $("fullscreen-button").setAttribute("aria-label", full ? "Exit full screen" : "Full screen");
   $("fullscreen-button").title = full ? "Exit full screen" : "Full screen";

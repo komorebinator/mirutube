@@ -1,15 +1,24 @@
 """What the server remembers between runs, in `mirutube.db` in the data
-folder (server#fields#data_folder): positions, the subtitle and sound choices, the library folders and the
-paths removed from the library. SQLite rather than a JSON file, because the server answers requests in
+folder (server#fields#data_folder): positions, the subtitle and sound choices, the library folders, the
+paths removed from the library and the settings shared by the household. SQLite rather than a JSON file, because the server answers requests in
 parallel and two positions written at once must not lose one
 (decisions#sqlite). Keyed by a video's path within the library, so it
 survives a rescan. There are no accounts: positions are shared by everyone in
 the household (decisions#no-accounts).
 """
 
+import json
 import os
 import sqlite3
 import time
+
+# store#fields#shared_settings: each setting with its default and what it may
+# be set to (behaviour#subtitle-size, downloads#functions#torrent)
+SUBTITLE_SIZES = (75, 100, 125, 150, 200)
+SHARED_SETTINGS = {
+    "subtitle_size": (100, lambda v: not isinstance(v, bool) and v in SUBTITLE_SIZES),
+    "seed_torrents": (True, lambda v: isinstance(v, bool)),
+}
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS positions (
@@ -35,6 +44,10 @@ CREATE TABLE IF NOT EXISTS library_folders (
 CREATE TABLE IF NOT EXISTS excluded (
     path     TEXT PRIMARY KEY,   -- a video or a folder, by its path within the library
     removed  REAL NOT NULL       -- when
+);
+CREATE TABLE IF NOT EXISTS shared_settings (
+    name     TEXT PRIMARY KEY,   -- a setting one for the whole household
+    value    TEXT NOT NULL       -- as JSON
 );
 CREATE TABLE IF NOT EXISTS meta (
     key      TEXT PRIMARY KEY,
@@ -184,3 +197,25 @@ class Store:
         for i in range(0, len(paths), 500):
             chunk = paths[i:i + 500]
             self._run("DELETE FROM positions WHERE path IN (%s)" % ",".join("?" * len(chunk)), chunk)
+
+    # shared_settings
+
+    def shared_settings(self):
+        """Every shared setting, its default where never set."""
+        kept = {}
+        for r in self._run("SELECT name, value FROM shared_settings"):
+            try:
+                kept[r["name"]] = json.loads(r["value"])
+            except ValueError:
+                pass
+        return {name: kept[name] if name in kept and valid(kept[name]) else default
+                for name, (default, valid) in SHARED_SETTINGS.items()}
+
+    def set_shared_setting(self, name, value):
+        """Sets one shared setting; False for an unknown one or a value it
+        cannot take."""
+        if name not in SHARED_SETTINGS or not SHARED_SETTINGS[name][1](value):
+            return False
+        self._run("INSERT INTO shared_settings (name, value) VALUES (?, ?) "
+                  "ON CONFLICT(name) DO UPDATE SET value = excluded.value", (name, json.dumps(value)))
+        return True

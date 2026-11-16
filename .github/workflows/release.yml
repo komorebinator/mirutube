@@ -1,0 +1,55 @@
+# image_promote: a published release copies the `experimental` image — the
+# one check_image ran against and the maintainer used — to the release's
+# version and to `latest`, by its digest and without building it again, and
+# attaches the files MiruTube is installed from. It refuses when what the image
+# is built from changed between the image's commit and the release's tag: the
+# image would not be that release's.
+name: release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  promote:
+    runs-on: ubuntu-24.04
+    env:
+      IMAGE: ghcr.io/${{ github.repository }}
+      TAG: ${{ github.event.release.tag_name }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Log in
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | skopeo login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - name: The image checked, and its commit
+        id: checked
+        run: |
+          digest="$(skopeo inspect --format '{{.Digest}}' "docker://$IMAGE:experimental")"
+          revision="$(skopeo inspect --format '{{index .Labels "org.opencontainers.image.revision"}}' \
+                      "docker://$IMAGE@$digest")"
+          echo "experimental is $digest, built from $revision"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          echo "revision=$revision" >> "$GITHUB_OUTPUT"
+      - name: Refuse an image that is not this release's
+        run: |
+          revision="${{ steps.checked.outputs.revision }}"
+          git merge-base --is-ancestor "$revision" "$TAG" \
+            || { echo "::error::experimental was built from $revision, which $TAG does not contain"; exit 1; }
+          changed="$(git diff --name-only "$revision" "$TAG" -- mirutube Containerfile image .containerignore)"
+          if [ -n "$changed" ]; then
+            echo "::error::what the image is built from changed since $revision:"; echo "$changed"; exit 1
+          fi
+      - name: Promote
+        run: |
+          for tag in "$TAG" latest; do
+            skopeo copy --all "docker://$IMAGE@${{ steps.checked.outputs.digest }}" "docker://$IMAGE:$tag"
+          done
+      - name: Attach the files MiruTube is installed from
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" mirutube.container nvidia.conf experimental.conf --clobber

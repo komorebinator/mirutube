@@ -59,6 +59,12 @@ def I(path):
     return short_ids([path])[path]
 
 
+def folders_of(settings):
+    """The library folders of a settings answer without the free space, which
+    changes as anything on the disk does."""
+    return [{k: v for k, v in f.items() if k != "free"} for f in settings["library_folders"]]
+
+
 def free_port():
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
@@ -157,6 +163,115 @@ class Server(unittest.TestCase):
         status, _, body = self.request("GET", path)
         self.assertEqual(status, 200, body)
         return json.loads(body)
+
+    @classmethod
+    def put(cls, path, data):
+        """A PUT of raw bytes, as a page sends a piece of a file: (status, JSON)."""
+        conn = http.client.HTTPConnection("127.0.0.1", cls.port, timeout=30)
+        try:
+            conn.request("PUT", path, body=data, headers={"Content-Type": "application/octet-stream"})
+            res = conn.getresponse()
+            body = res.read()
+            try:
+                return res.status, json.loads(body)
+            except ValueError:
+                return res.status, body
+        finally:
+            conn.close()
+
+    def job_state(self, job):
+        return next(j for j in self.get_json("/api/downloads")["jobs"] if j["id"] == job)
+
+    # ---------------------------------------------------------- uploads
+
+    def test_upload_arrives_in_pieces(self):
+        # behaviour#uploads#scenarios#folder, decisions#upload-in-pieces
+        with open(os.path.join(self.tmp, SHORT), "rb") as f:
+            video = f.read()
+        subs = "1\n00:00:01,000 --> 00:00:02,000\nHello\n".encode()
+        folder = os.path.join(self.lib, "Trip 2025")
+        self.addCleanup(shutil.rmtree, folder, True)
+        files = [{"path": "Trip 2025/clip.mp4", "size": len(video)}, {"path": "Trip 2025/clip.srt", "size": len(subs)}]
+        status, started = self.post("/api/downloads/upload", {"files": files})
+        self.assertEqual(status, 200, started)
+        job = started["job"]
+        self.addCleanup(self.post, "/api/downloads/dismiss", {"job": job})
+        self.assertEqual(started["received"], [0, 0])
+        half = len(video) // 2
+        self.assertEqual(self.put("/api/downloads/%s/0?offset=0" % job, video[:half]), (200, {"received": half}))
+        # not in the library while it is incoming (decisions#incoming)
+        self.post("/api/rescan", {})
+        self.assertNotIn(I("library/Trip 2025/clip.mp4"), self.get_json("/api/catalogue")["videos"])
+        # the connection broke and the piece is sent again: the page is told where the file ends
+        self.assertEqual(self.put("/api/downloads/%s/0?offset=0" % job, video[:half]), (409, {"received": half}))
+        # the same files sent again from a page go on with the same job
+        status, again = self.post("/api/downloads/upload", {"files": files})
+        self.assertEqual((status, again), (200, {"job": job, "received": [half, 0]}))
+        self.assertEqual(self.put("/api/downloads/%s/0?offset=%d" % (job, half), video[half:])[0], 200)
+        self.assertEqual(self.put("/api/downloads/%s/1?offset=0" % job, subs)[0], 200)
+        self.post("/api/rescan", {})
+        cat = self.get_json("/api/catalogue")
+        vid = I("library/Trip 2025/clip.mp4")
+        self.assertIn(vid, cat["videos"])
+        self.assertEqual(len(cat["videos"][vid]["subtitles"]), 1)
+        with open(os.path.join(folder, "clip.mp4"), "rb") as f:
+            self.assertEqual(f.read(), video)
+        state = self.job_state(job)
+        self.assertEqual((state["state"], state["done"], state["size"]), ("done", len(video) + len(subs),
+                                                                         len(video) + len(subs)))
+        self.assertFalse(os.path.exists(os.path.join(self.lib, ".mirutube-incoming", job)))
+        # a piece for a job there is not
+        self.assertEqual(self.put("/api/downloads/%s/0?offset=0" % ("0" * 12), b"x")[0], 404)
+
+    def test_upload_names_stay_inside_the_library(self):
+        # behaviour#library-only#scenarios#upload-dot-dot
+        status, started = self.post("/api/downloads/upload", {"files": [{"path": "../../evil.mp4", "size": 3}]})
+        self.assertEqual(status, 200, started)
+        self.addCleanup(self.post, "/api/downloads/dismiss", {"job": started["job"]})
+        self.addCleanup(lambda: os.path.exists(os.path.join(self.lib, "evil.mp4"))
+                        and os.remove(os.path.join(self.lib, "evil.mp4")))
+        self.assertEqual(self.put("/api/downloads/%s/0?offset=0" % started["job"], b"abc")[0], 200)
+        self.assertTrue(os.path.isfile(os.path.join(self.lib, "evil.mp4")))
+        self.assertFalse(os.path.exists(os.path.join(self.tmp, "evil.mp4")))
+        self.assertFalse(os.path.exists(os.path.join(os.path.dirname(self.tmp), "evil.mp4")))
+        # a loose file that is not a video, subtitles or sound is not taken
+        status, body = self.post("/api/downloads/upload", {"files": [{"path": "notes.pdf", "size": 3}]})
+        self.assertEqual(status, 422)
+        self.assertIn(b"not supported", body if isinstance(body, bytes) else str(body).encode())
+
+    def test_next_episode_joins_its_series(self):
+        # behaviour#uploads#scenarios#next-episode
+        target = os.path.join(self.lib, "Series", "Series - 07.mp4")
+        self.addCleanup(lambda: os.path.exists(target) and os.remove(target))
+        status, started = self.post("/api/downloads/upload", {"files": [{"path": "Series - 07.mp4", "size": 4}]})
+        self.assertEqual(status, 200, started)
+        self.addCleanup(self.post, "/api/downloads/dismiss", {"job": started["job"]})
+        self.assertEqual(self.job_state(started["job"])["into"], "library/Series")
+        self.assertEqual(self.put("/api/downloads/%s/0?offset=0" % started["job"], b"abcd")[0], 200)
+        self.assertTrue(os.path.isfile(target))
+
+    def test_cancel_takes_back_what_it_brought(self):
+        # behaviour#uploads#scenarios#cancel
+        before = os.path.join(self.lib, "Show", "Show - 01.mp4")
+        files = [{"path": "Show/extra.mp4", "size": 3}, {"path": "Fresh/a.mp4", "size": 3},
+                 {"path": "Fresh/b.mp4", "size": 6}]
+        status, started = self.post("/api/downloads/upload", {"files": files})
+        self.assertEqual(status, 200, started)
+        job = started["job"]
+        for n, data in ((0, b"abc"), (1, b"abc"), (2, b"abc")):
+            self.assertEqual(self.put("/api/downloads/%s/%d?offset=0" % (job, n), data)[0], 200)
+        self.assertTrue(os.path.isfile(os.path.join(self.lib, "Show", "extra.mp4")))
+        self.assertTrue(os.path.isfile(os.path.join(self.lib, "Fresh", "a.mp4")))
+        self.assertEqual(self.post("/api/downloads/cancel", {"job": job})[0], 200)
+        self.assertFalse(os.path.exists(os.path.join(self.lib, "Show", "extra.mp4")))
+        self.assertFalse(os.path.exists(os.path.join(self.lib, "Fresh")))
+        self.assertTrue(os.path.isfile(before))  # what was there before stays
+        self.assertFalse(os.path.exists(os.path.join(self.lib, ".mirutube-incoming", job)))
+        self.assertEqual(self.job_state(job)["state"], "cancelled")
+        # a finished one is not cancelled, and leaves the list by its ×
+        self.assertEqual(self.post("/api/downloads/cancel", {"job": job})[0], 422)
+        self.assertEqual(self.post("/api/downloads/dismiss", {"job": job})[0], 200)
+        self.assertNotIn(job, [j["id"] for j in self.get_json("/api/downloads")["jobs"]])
 
     # ------------------------------------------------------------ Range
 
@@ -618,7 +733,7 @@ class Server(unittest.TestCase):
         settings = json.loads(body)
         self.assertEqual(status, 200)
         self.assertFalse(settings["local"])
-        self.assertEqual(settings["library_folders"], [{"name": "library", "folder": self.lib}])
+        self.assertEqual(folders_of(settings), [{"name": "library", "folder": self.lib}])
         more = os.path.join(self.tmp, "more")
         for change in ({"action": "add", "folder": more}, {"action": "remove", "folder": self.lib}):
             status, _ = self.post("/api/settings/library-folders", change, source="127.0.0.2")
@@ -634,8 +749,10 @@ class Server(unittest.TestCase):
         status, settings = self.post("/api/settings/library-folders", {"action": "add", "folder": more})
         self.assertEqual(status, 200, settings)
         self.addCleanup(self.request, "POST", "/api/settings/library-folders", {"action": "remove", "folder": more})
-        self.assertEqual(settings["library_folders"], [{"name": "library", "folder": self.lib},
-                                                       {"name": "more", "folder": more}])
+        self.assertEqual(folders_of(settings), [{"name": "library", "folder": self.lib},
+                                                {"name": "more", "folder": more}])
+        # each with the free space on its disk (behaviour#library-control)
+        self.assertTrue(all(isinstance(f["free"], int) and f["free"] > 0 for f in settings["library_folders"]))
         cat = self.get_json("/api/catalogue")
         self.assertIn(I("more/Extra clip.mp4"), cat["videos"])
         self.assertEqual(self.request("GET", "/video/" + I("more/Extra clip.mp4"))[0], 200)
@@ -736,6 +853,58 @@ class Server(unittest.TestCase):
         time.sleep(0.5)
         self.assertEqual(tv.commands(), [])
         self.assertEqual(phone.commands(), [])
+
+    def test_load_carries_volume_and_speed(self):
+        # behaviour#devices#scenarios#move: the video goes on as loud and as fast
+        tv = self.events("dev-l1", "Living room TV")
+        phone = self.events("dev-l2", "Phone")
+        phone.wait_devices(lambda ds: "dev-l1" in ds)
+        load = {"action": "load", "video": I(EPISODE), "position": 750, "audio": None, "subtitle": None,
+                "volume": 0.4, "speed": 1.5}
+        status, _, body = self.request("POST", "/api/control", dict(load, device="dev-l1"))
+        self.assertEqual(status, 200, body)
+        self.assertEqual(tv.wait_command(), load)
+        for bad in ({"volume": 1.5}, {"volume": "x"}, {"speed": 3}):
+            self.assertEqual(self.request("POST", "/api/control", dict(load, device="dev-l1", **bad))[0], 400, bad)
+        time.sleep(0.3)
+        self.assertEqual(tv.commands(), [])
+
+    def test_shared_setting_reaches_every_page(self):
+        # behaviour#subtitle-size#scenarios#shared-size: changed on a phone,
+        # applied on every device at once
+        tv = self.events("dev-s1", "Living room TV")
+        phone = self.events("dev-s2", "Phone")
+        self.assertEqual(tv.wait_topic("settings"), {"subtitle_size": 100, "seed_torrents": True})
+        self.addCleanup(self.post, "/api/settings/shared", {"subtitle_size": 100})
+        status, shared = self.post("/api/settings/shared", {"subtitle_size": 150})
+        self.assertEqual((status, shared["subtitle_size"]), (200, 150))
+        for page in (tv, phone):
+            page.wait_topic("settings", lambda d: d["subtitle_size"] == 150)
+        self.assertEqual(self.get_json("/api/settings")["shared"]["subtitle_size"], 150)
+        for bad in ({"subtitle_size": 120}, {"subtitle_size": True}, {"seed_torrents": "yes"},
+                    {"nothing": 1}, {"subtitle_size": 125, "nothing": 1}):
+            self.assertEqual(self.post("/api/settings/shared", bad)[0], 400, bad)
+        self.assertEqual(self.get_json("/api/settings")["shared"]["subtitle_size"], 150)  # none half-applied
+
+    def test_continue_row_reaches_every_page(self):
+        # behaviour#resume#scenarios#live-row: the row is sent when it
+        # changes, and a position moving on within a video sends nothing
+        laptop = self.events("dev-r1", "Laptop")
+        laptop.wait_devices(lambda ds: "dev-r1" in ds)
+        self.post("/api/forget", {"playlist": I("library/Series")})  # what another test left there
+        self.addCleanup(self.post, "/api/forget", {"playlist": I("library/Series")})
+        third, fourth = I(SERIES[2]), I(SERIES[3])
+        self.request("POST", "/api/position", {"video": third, "position": 100})
+        row = laptop.wait_topic("continue", lambda d: third in d["continue"])
+        self.assertEqual(row["videos"][third], {"position": 100, "watched": False})
+        self.request("POST", "/api/position", {"video": third, "position": 200})
+        time.sleep(0.5)
+        self.assertEqual([d for d in laptop.topic_events("continue") if third in d["videos"]], [])
+        # watched to its end: the card goes on to the next episode
+        self.request("POST", "/api/position", {"video": third, "position": DURATION})
+        row = laptop.wait_topic("continue", lambda d: fourth in d["continue"])
+        self.assertNotIn(third, row["continue"])
+        self.assertEqual(row["videos"][third], {"position": 0, "watched": True})
 
     def test_report_carries_volume_and_speed(self):
         tv = self.events("dev-c3", "TV")
@@ -900,6 +1069,7 @@ class EventReader:
             pass
         self.lists = queue.Queue()
         self.command_queue = queue.Queue()
+        self.topics = {"settings": queue.Queue(), "continue": queue.Queue()}
         self._seen = []
         self.thread = threading.Thread(target=self._read, daemon=True)
         self.thread.start()
@@ -918,6 +1088,8 @@ class EventReader:
                         self.lists.put({d["id"]: d for d in json.loads("\n".join(data))["devices"]})
                     elif event == "command":
                         self.command_queue.put(json.loads("\n".join(data)))
+                    elif event in self.topics:
+                        self.topics[event].put(json.loads("\n".join(data)))
                     event, data = None, []
         except (OSError, ValueError):
             pass
@@ -946,6 +1118,28 @@ class EventReader:
 
     def latest(self):
         return self.all_lists()[-1]
+
+    def wait_topic(self, topic, wanted=lambda data: True, timeout=5):
+        """The first `settings` or `continue` event that `wanted` accepts."""
+        deadline = time.monotonic() + timeout
+        while True:
+            left = deadline - time.monotonic()
+            if left <= 0:
+                raise AssertionError("no such %s event came" % topic)
+            try:
+                data = self.topics[topic].get(timeout=left)
+            except queue.Empty:
+                continue
+            if wanted(data):
+                return data
+
+    def topic_events(self, topic):
+        found = []
+        while True:
+            try:
+                found.append(self.topics[topic].get_nowait())
+            except queue.Empty:
+                return found
 
     def wait_command(self, timeout=5):
         return self.command_queue.get(timeout=timeout)
@@ -1053,13 +1247,13 @@ class DevicesHub(unittest.TestCase):
             hub.command("stuck", {"action": "seek", "position": float(i)})
         self.assertLess(time.monotonic() - began, 2)  # never waits on a stream
         changed, commands = stuck.take(0)
-        self.assertTrue(changed)  # one flag, the list taken when written
+        self.assertEqual(changed, {"devices"})  # one flag, the list taken when written
         self.assertEqual(len(commands), COMMANDS_KEPT)
         self.assertEqual(commands[-1], {"action": "seek", "position": 999.0})
         changed, commands = other.take(0)
-        self.assertTrue(changed)
+        self.assertEqual(changed, {"devices"})
         self.assertEqual(commands, [])
-        self.assertEqual(stuck.take(0), (False, []))
+        self.assertEqual(stuck.take(0), (set(), []))
         hub.close()
         self.assertTrue(stuck.closed and other.closed)
 
@@ -1515,7 +1709,7 @@ class HostRoot(unittest.TestCase):
                 time.sleep(0.2)
         status, settings = call("POST", "/api/settings/library-folders", {"action": "add", "folder": "/mnt/media/Series"})
         self.assertEqual(status, 200, settings)
-        self.assertEqual(settings["library_folders"], [{"name": "Series", "folder": "/mnt/media/Series"}])
+        self.assertEqual(folders_of(settings), [{"name": "Series", "folder": "/mnt/media/Series"}])
         self.assertEqual(call("POST", "/api/settings/library-folders",
                               {"action": "add", "folder": "/mnt/nothing"})[0], 404)
         _, cat = call("GET", "/api/catalogue")

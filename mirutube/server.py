@@ -39,7 +39,11 @@ Routes:
   GET  /api/events?id=<device>&name=<name>
                                       the page's event stream (Server-Sent Events):
                                       `devices` {now, devices: [device...]} on every change,
-                                      `command` {action, ...} for this device alone
+                                      `command` {action, ...} for this device alone,
+                                      `settings` {subtitle_size, seed_torrents} when one changes,
+                                      `continue` {continue: [video...], videos: {id: {position,
+                                      watched}}, version} when continue_row changes,
+                                      `jobs` [job...] when a download changes, at most once a second
   POST /api/report                    {id, name?, video|null, audio|null, subtitle|null,
                                        position, playing, volume?, muted?, speed?} -> {ok}
   POST /api/control                   {device, action: play|pause|stop|previous|next} or
@@ -49,14 +53,27 @@ Routes:
                                       {device, action: audio, audio|null} or
                                       {device, action: subtitle, subtitle|null} or
                                       {device, action: load, video, position, audio|null,
-                                       subtitle|null} -> {ok}
-  GET  /api/settings                  {local, library_folders: [...], excluded: [...]}
+                                       subtitle|null, volume?, speed?} -> {ok}
+  GET  /api/settings                  {local, library_folders: [{name, folder, free}...],
+                                       excluded: [...], shared: {subtitle_size, seed_torrents}}
+  POST /api/settings/shared           {<setting>: value, ...} -> shared settings; from any device
   POST /api/settings/library-folders  {action: add|remove, folder} -> settings;
                                       from the computer MiruTube runs on alone
   POST /api/library/remove            {id} -> {id, path, kind}
   POST /api/library/restore           {path} -> {path}
   POST /api/forget                    {playlist} or {video} -> {forgotten: [video...]}
   POST /api/rescan                    -> {videos, playlists}
+  GET  /api/downloads                 {jobs: [job...]}: what is coming into the library (downloads)
+  POST /api/downloads/upload          {folder?, files: [{path, size}], device?} -> {job, received: [bytes...]}
+  PUT  /api/downloads/<job>/<n>?offset=<bytes>
+                                      a piece of the job's file n -> {received}; 409 with
+                                      {received} when the offset is not where the file ends
+  PUT  /api/downloads/torrent?folder=<name>&device=<id>
+                                      a .torrent file -> {job}
+  POST /api/downloads/link            {folder?, link, device?} -> {job}: a site, a .torrent or a magnet
+  POST /api/downloads/cancel          {job}: an unfinished one, deleting what it wrote
+  POST /api/downloads/stop-seeding    {job}
+  POST /api/downloads/dismiss         {job}: a finished one leaves the list
   GET  /api/address                   {address, secure, host, port}
   GET  /api/address.svg               its QR code as SVG
 """
@@ -82,8 +99,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlsplit
 
 from mirutube import certificates, media, qr
+from mirutube.downloads import PIECE_LIMIT, TORRENT_LIMIT, Downloads, NotSupported
 from mirutube.library import Library, VIDEO_EXTENSIONS, normalise, on_host
-from mirutube.store import Store
+from mirutube.store import SHARED_SETTINGS, Store
 
 DEFAULT_PORT = 8800
 DEFAULT_CACHE = media.platform_cache_dir()
@@ -239,20 +257,21 @@ SPEEDS = (0.5, 2.0)           # the playback speeds now_playing#speed offers, lo
 class EventStream:
     """What waits to be sent on one page's event stream. Senders only mark it
     and wake its own thread, which does the writing, so a client that stops
-    reading never holds up the others. A change to the devices is one flag —
-    the list is taken when it is written, so a slow stream gets the latest list
-    once rather than every list in between."""
+    reading never holds up the others. A change is one flag per topic —
+    `devices`, `settings`, `continue`, `jobs` — and what the topic holds is
+    taken when it is written, so a slow stream gets the latest once rather than
+    every one in between."""
 
-    def __init__(self, device):
+    def __init__(self, device, first=("devices",)):
         self.device = device
-        self.changed = True   # the list is sent first thing
+        self.changed = set(first)   # sent first thing
         self.commands = collections.deque(maxlen=COMMANDS_KEPT)
         self.closed = False
         self._wake = threading.Condition()
 
-    def mark_changed(self):
+    def mark_changed(self, topic="devices"):
         with self._wake:
-            self.changed = True
+            self.changed.add(topic)
             self._wake.notify()
 
     def push(self, command):
@@ -266,14 +285,38 @@ class EventStream:
             self._wake.notify()
 
     def take(self, timeout):
-        """Waits up to `timeout` for something to send; (changed, commands)."""
+        """Waits up to `timeout` for something to send; (topics changed,
+        commands)."""
         with self._wake:
             if not (self.changed or self.commands or self.closed):
                 self._wake.wait(timeout)
             changed, commands = self.changed, list(self.commands)
-            self.changed = False
+            self.changed = set()
             self.commands.clear()
             return changed, commands
+
+
+class ContinueRow:
+    """continue_row as the pages were last told it: the row's videos and what
+    was sent with them, so a position moving on within a video, which leaves
+    the row as it was, sends nothing."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self.last = None
+        self.payload = None
+        self.version = 0      # counts the changes; the catalogue says which one it is as new as
+
+    def update(self, ids, payload):
+        """Takes the row as it is now; True when it changed. The payload is
+        numbered, so a page that loads the catalogue while it comes keeps the
+        newer of the two."""
+        with self._lock:
+            if ids == self.last:
+                return False
+            self.version += 1
+            self.last, self.payload = list(ids), dict(payload, version=self.version)
+            return True
 
 
 class Devices:
@@ -288,8 +331,8 @@ class Devices:
         self._streams = {}    # id -> set of EventStream
         self._closed = False
 
-    def connect(self, device_id, name):
-        stream = EventStream(device_id)
+    def connect(self, device_id, name, first=("devices",)):
+        stream = EventStream(device_id, first)
         with self._lock:
             if self._closed:
                 stream.closed = True
@@ -331,11 +374,12 @@ class Devices:
         with self._lock:
             return {"now": time.time(), "devices": [dict(d) for d in self._devices.values()]}
 
-    def broadcast(self):
+    def broadcast(self, topic="devices"):
+        """Marks `topic` changed on every page's stream."""
         with self._lock:
             streams = [s for group in self._streams.values() for s in group]
         for s in streams:
-            s.mark_changed()
+            s.mark_changed(topic)
 
     def report(self, device_id, state):
         """Records what a device plays; False for a device not connected."""
@@ -391,6 +435,8 @@ class Handler(BaseHTTPRequestHandler):
     store = None
     slots = None
     devices = None
+    continue_row = None
+    downloads = None
     quiet = False
     data_dir = None              # where MiruTube's authority is kept, when it is the one in use
     port = DEFAULT_PORT
@@ -533,6 +579,8 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if path == "/api/settings":
                 return self.send_json(self.settings())
+            if path == "/api/downloads":
+                return self.send_json({"jobs": self.downloads.snapshot()})
             if path == "/api/address":
                 return self.send_json(self.address())
             if path == "/api/address.svg":
@@ -566,6 +614,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.fail(HTTPStatus.BAD_REQUEST, "expected a JSON object")
         if path == "/api/settings/library-folders":
             return self.change_library_folders(data)
+        if path == "/api/settings/shared":
+            return self.change_shared_settings(data)
         if path in ("/api/library/remove", "/api/library/restore"):
             return self.remove_or_restore(data, path.endswith("remove"))
         if path == "/api/forget":
@@ -590,6 +640,8 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 self.store.set_audio_choice(folder, label, language)
             return self.send_json({"playlist": playlist, "label": label, "language": language})
+        if path.startswith("/api/downloads/"):
+            return self.download_action(path[len("/api/downloads/"):], data)
         if path == "/api/report":
             return self.take_report(data)
         if path == "/api/control":
@@ -613,6 +665,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_bytes(HTTPStatus.OK, f.read(), ctype, {"Cache-Control": "no-cache"}, head)
 
     def catalogue(self):
+        version = self.continue_row.version  # read first: the row computed below is at least this new
         cat = self.library.catalogue()
         positions = self.store.positions()
         videos = {}
@@ -641,6 +694,7 @@ class Handler(BaseHTTPRequestHandler):
         return {"playlists": playlists, "standalone": [short[v] for v in cat["standalone"]],
                 "videos": {short[vid]: v for vid, v in videos.items()},
                 "continue": [short[v] for v in continue_list(cat, known)],
+                "continue_version": version,
                 "subtitle_choices": choices(self.store.subtitle_choices()),
                 "audio_choices": choices(self.store.audio_choices())}
 
@@ -663,19 +717,21 @@ class Handler(BaseHTTPRequestHandler):
             position = 0.0
         self.store.set_position(vid, position, watched)
         self.send_json({"video": sid, "position": position, "watched": watched})
+        self.announce_continue((vid,))
 
     def serve_events(self, device_id, name):
         """The stream of events one page keeps with the server
         (decisions#events). The page is a device from the moment it opens it
         until it closes, and for DEVICE_GRACE after (Devices). Every change to
         the devices is sent as `devices`, a command for this device as
-        `command`. The connection is watched for the page going: a closed
+        `command`, the shared settings as `settings` when one changes, and
+        continue_row as `continue` when it changes (ContinueRow). The connection is watched for the page going: a closed
         connection ends the stream within a second, and a write that does not
         get through within EVENT_WRITE_TIMEOUT ends it too."""
         name = name.strip()[:NAME_LENGTH] or "Device"
         if not device_id or len(device_id) > 64:
             return self.fail(HTTPStatus.BAD_REQUEST, "a device id is needed")
-        stream = self.devices.connect(device_id, name)
+        stream = self.devices.connect(device_id, name, first=("devices", "settings", "jobs"))
         self.close_connection = True
         try:
             self.connection.settimeout(EVENT_WRITE_TIMEOUT)
@@ -692,8 +748,11 @@ class Handler(BaseHTTPRequestHandler):
                 if stream.closed:
                     break
                 out = b""
-                if changed:
-                    out += _event("devices", self.devices.snapshot())
+                for topic in ("devices", "settings", "continue", "jobs"):
+                    if topic in changed:
+                        data = self.topic(topic)
+                        if data is not None:
+                            out += _event(topic, data)
                 for command in commands:
                     out += _event("command", command)
                 if not out and time.monotonic() - quiet_since >= KEEPALIVE:
@@ -708,6 +767,35 @@ class Handler(BaseHTTPRequestHandler):
             pass  # the page went: a broken pipe, a reset, or a write that timed out
         finally:
             self.devices.disconnect(stream)
+
+    def topic(self, topic):
+        """What one topic of the event stream holds now."""
+        if topic == "devices":
+            return self.devices.snapshot()
+        if topic == "settings":
+            return self.store.shared_settings()
+        if topic == "continue":
+            return self.continue_row.payload
+        if topic == "jobs":
+            return self.downloads.snapshot()
+        return None
+
+    def announce_continue(self, also=()):
+        """server#serve_events: continue_row's videos, with the positions of
+        those and of the videos in `also`, to every page when the row is no
+        longer what it was (behaviour#resume#scenarios#live-row)."""
+        cat = self.library.catalogue()
+        positions = self.store.positions()
+        known = {vid: p for vid, p in positions.items() if vid in cat["videos"]}
+        ids = continue_list(cat, known)
+        short = cat["short"]
+        videos = {}
+        for vid in list(ids) + [v for v in also if v in cat["videos"]]:
+            p = positions.get(vid)
+            videos[short[vid]] = {"position": p["position"] if p else 0.0, "watched": p["watched"] if p else False}
+        payload = {"continue": [short[v] for v in ids], "videos": videos}
+        if self.continue_row.update([short[v] for v in ids], payload):
+            self.devices.broadcast("continue")
 
     def take_report(self, data):
         """server#control: a page's report of what its device plays — and,
@@ -748,8 +836,8 @@ class Handler(BaseHTTPRequestHandler):
     def control(self, data):
         """server#control: a page's command for any device — play, pause,
         seek, previous, next, volume, speed, sound track, subtitles, stop,
-        and load: play a video from a position with the given tracks, which
-        is how playback moves from one device to another
+        and load: play a video from a position with the given tracks, volume
+        and speed, which is how playback moves from one device to another
         (behaviour#devices). The command reaches that device alone; whether it
         can be done there — a track the video has — is that device's to find
         out. Full screen is not among them: a browser goes full screen only
@@ -796,6 +884,18 @@ class Handler(BaseHTTPRequestHandler):
             if self.library.video(vid) is None:
                 return self.fail(HTTPStatus.NOT_FOUND, "no such video")
             command.update(video=video, audio=audio, subtitle=subtitle)
+            # the device it moves to plays as loud and as fast (behaviour#devices)
+            volume, speed = data.get("volume"), data.get("speed")
+            if volume is not None:
+                volume = _number(volume)
+                if volume is None or volume > 1:
+                    return self.fail(HTTPStatus.BAD_REQUEST, "volume runs from 0 to 1")
+                command["volume"] = volume
+            if speed is not None:
+                speed = _number(speed)
+                if speed is None or not SPEEDS[0] <= speed <= SPEEDS[1]:
+                    return self.fail(HTTPStatus.BAD_REQUEST, "speed runs from %g to %g" % SPEEDS)
+                command["speed"] = speed
         if not self.devices.command(device_id, command):
             return self.fail(HTTPStatus.NOT_FOUND, "no such device")
         self.send_json({"ok": True})
@@ -810,9 +910,10 @@ class Handler(BaseHTTPRequestHandler):
         return is_local_request(self.client_address[0], self.connection.getsockname()[0])
 
     def settings(self):
-        """server#settings: the library folders, and what was removed from
-        the library with what each is — a video, a folder, or gone from the
-        disk since."""
+        """server#settings: the library folders with the free space on the
+        disk of each, what was removed from the library with what each is — a
+        video, a folder, or gone from the disk since — and the shared
+        settings."""
         excluded = []
         for path in self.store.excluded():
             full = self.library.resolve(path)
@@ -822,8 +923,25 @@ class Handler(BaseHTTPRequestHandler):
             excluded.append({"path": path, "kind": kind,
                              "title": normalise(name, is_file=kind != "folder") or name})
         return {"local": self.is_local(),
-                "library_folders": [{"name": n, "folder": f} for n, f in self.library.folders.items()],
-                "excluded": excluded}
+                "library_folders": [{"name": n, "folder": f, "free": free_space(on_host(f))}
+                                    for n, f in self.library.folders.items()],
+                "excluded": excluded,
+                "shared": self.store.shared_settings()}
+
+    def change_shared_settings(self, data):
+        """server#settings: store#fields#shared_settings, changed from any
+        device for every device, and sent to every page at once."""
+        if not data:
+            return self.fail(HTTPStatus.BAD_REQUEST, "expected {setting: value}")
+        for name, value in data.items():
+            if name not in SHARED_SETTINGS:
+                return self.fail(HTTPStatus.BAD_REQUEST, "no such setting: %s" % name)
+            if not SHARED_SETTINGS[name][1](value):
+                return self.fail(HTTPStatus.BAD_REQUEST, "%s cannot be %s" % (name, json.dumps(value)))
+        for name, value in data.items():
+            self.store.set_shared_setting(name, value)
+        self.devices.broadcast("settings")
+        self.send_json(self.store.shared_settings())
 
     def reconfigure(self):
         self.library.configure(self.store.library_folders(), self.store.excluded())
@@ -889,7 +1007,8 @@ class Handler(BaseHTTPRequestHandler):
             self.store.exclude(path)
             kind = "folder" if os.path.isdir(full) else "video"
             self.reconfigure()
-            return self.send_json({"id": sid, "path": path, "kind": kind})
+            self.send_json({"id": sid, "path": path, "kind": kind})
+            return self.announce_continue()
         path = data.get("path")
         if not isinstance(path, str) or not path.strip("/"):
             return self.fail(HTTPStatus.BAD_REQUEST, "expected {path}")
@@ -898,6 +1017,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.fail(HTTPStatus.NOT_FOUND, "not removed")
         self.reconfigure()
         self.send_json({"path": path})
+        self.announce_continue()
 
     def forget(self, data):
         """server#settings: forgets the positions of a playlist's videos, or of
@@ -918,6 +1038,108 @@ class Handler(BaseHTTPRequestHandler):
             return self.fail(HTTPStatus.BAD_REQUEST, "expected {playlist} or {video}")
         self.store.forget_positions(videos)
         self.send_json({"forgotten": [self.library.id_of(v) for v in videos]})
+        self.announce_continue(videos)
+
+    # ----------------------------------------------------------- uploads
+
+    def device_name(self, device_id):
+        if not isinstance(device_id, str):
+            return None
+        d = next((d for d in self.devices.snapshot()["devices"] if d["id"] == device_id), None)
+        return d["name"] if d else None
+
+    def upload_folder(self, name):
+        """The library folder an upload goes to, by its name: the one asked
+        for, else the first."""
+        folders = list(self.library.folders)
+        if name is None and folders:
+            return folders[0]
+        if name not in folders:
+            raise NotSupported("no such library folder: %s" % name)
+        return name
+
+    def downloading(self, work):
+        """Runs one request of server#uploads, answering what downloads
+        refuses as the page shows it."""
+        try:
+            return work()
+        except NotSupported as e:
+            self.fail(HTTPStatus.UNPROCESSABLE_ENTITY, str(e))
+        except (ValueError, TypeError) as e:
+            self.fail(HTTPStatus.BAD_REQUEST, str(e) or "expected another request")
+        except KeyError:
+            self.fail(HTTPStatus.NOT_FOUND, "no such download")
+        except OSError as e:
+            self.fail(HTTPStatus.INSUFFICIENT_STORAGE if e.errno == 28 else HTTPStatus.INTERNAL_SERVER_ERROR,
+                      str(e))
+
+    def download_action(self, action, data):
+        """server#uploads: start an upload or a link, cancel, stop seeding,
+        drop a finished one. Any device may upload: what is written stays
+        inside the library folders (decisions#upload-anywhere)."""
+        device = data.get("device")
+        name = self.device_name(device)
+
+        def work():
+            if action == "upload":
+                files = data.get("files")
+                if not isinstance(files, list) or not all(isinstance(f, dict) for f in files):
+                    raise ValueError("expected {files: [{path, size}]}")
+                job, received = self.downloads.start_upload(self.upload_folder(data.get("folder")), files,
+                                                            device, name)
+                return self.send_json({"job": job["id"], "received": received})
+            if action == "link":
+                if not isinstance(data.get("link"), str):
+                    raise ValueError("expected {link}")
+                job = self.downloads.start_link(self.upload_folder(data.get("folder")), data["link"], device, name)
+                return self.send_json({"job": job["id"]})
+            job_id = data.get("job")
+            if not isinstance(job_id, str):
+                raise ValueError("expected {job}")
+            if action == "cancel":
+                self.downloads.cancel(job_id)
+            elif action == "stop-seeding":
+                self.downloads.stop_seeding(job_id)
+            elif action == "dismiss":
+                self.downloads.dismiss(job_id)
+            else:
+                return self.fail(HTTPStatus.NOT_FOUND)
+            return self.send_json({"ok": True})
+        self.downloading(work)
+
+    def do_PUT(self):
+        """server#uploads: a piece of a file sent from a page, or a .torrent."""
+        url = urlsplit(self.path)
+        path, query = url.path, parse_qs(url.query)
+        try:
+            length = int(self.headers.get("Content-Length") or -1)
+        except ValueError:
+            length = -1
+        torrent = path == "/api/downloads/torrent"
+        limit = TORRENT_LIMIT if torrent else PIECE_LIMIT
+        if length < 0 or length > limit:
+            self.close_connection = True
+            return self.fail(HTTPStatus.REQUEST_ENTITY_TOO_LARGE if length > limit else HTTPStatus.LENGTH_REQUIRED)
+        body = self.rfile.read(length)
+        if len(body) != length:
+            self.close_connection = True
+            return self.fail(HTTPStatus.BAD_REQUEST, "the piece did not arrive whole")
+        if torrent:
+            def start():
+                device = (query.get("device") or [None])[0]
+                job = self.downloads.start_torrent(self.upload_folder((query.get("folder") or [None])[0]),
+                                                   data=body, device=device, device_name=self.device_name(device))
+                self.send_json({"job": job["id"]})
+            return self.downloading(start)
+        m = re.fullmatch(r"/api/downloads/([0-9a-f]+)/(\d+)", path)
+        if not m:
+            return self.fail(HTTPStatus.NOT_FOUND)
+
+        def piece():
+            offset = int((query.get("offset") or ["x"])[0])
+            taken, received = self.downloads.receive(m.group(1), int(m.group(2)), offset, body)
+            self.send_json({"received": received}, HTTPStatus.OK if taken else HTTPStatus.CONFLICT)
+        self.downloading(piece)
 
     # ------------------------------------------------------------- address
 
@@ -1169,6 +1391,8 @@ def make_server(library_dir=None, port=DEFAULT_PORT, host="", cache_dir=DEFAULT_
         "store": store,
         "slots": ViewerSlots(),
         "devices": Devices(),
+        "continue_row": ContinueRow(),
+        "downloads": None,
         "quiet": quiet,
         "data_dir": authority_dir,
         "server_address_host": bound,
@@ -1179,6 +1403,10 @@ def make_server(library_dir=None, port=DEFAULT_PORT, host="", cache_dir=DEFAULT_
     handler.port = server.server_address[1]
     server.devices = handler.devices
     server.handler = handler
+    devices = handler.devices
+    handler.downloads = Downloads(data_dir, handler.library, store.shared_settings,
+                                  lambda: devices.broadcast("jobs"))
+    server.downloads = handler.downloads
     return server
 
 
@@ -1237,6 +1465,15 @@ def _log_encoder():
     hardware encoders takes a moment the server need not wait for."""
     encoder = media.transcoder()
     print("MiruTube: converting with %s" % media.describe_encoder(encoder), flush=True)
+
+
+def free_space(folder):
+    """The bytes free on the disk a folder is on, or None when it cannot be
+    read — a disk not mounted."""
+    try:
+        return shutil.disk_usage(folder).free
+    except OSError:
+        return None
 
 
 def _loopback(host):
@@ -1379,6 +1616,7 @@ def main(argv=None):
         pass
     finally:
         stop.set()
+        server.downloads.close()
         server.devices.close()
         server.server_close()
     return 0

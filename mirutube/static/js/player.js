@@ -1,16 +1,16 @@
 // The video element on watch — what plays on this device: loading a video as
-// it is or piece by piece, its sound and subtitle tracks, starting it where
-// the browser allows sound, the position and what this device plays reported
-// to the server, and `local`: every control of now_playing, done here.
+// it is or piece by piece, its sound and subtitle tracks, starting it with
+// sound or not at all, sending it away to another device, the position and
+// what this device plays reported to the server, and `local`: every control
+// of now_playing, done here.
 
 import { $, el } from "./dom.js";
 import { getJSON, idUrl, postJSON } from "./api.js";
 import {
   state, notify, navigate, watchHref, choiceKey, nextOf, previousOf,
 } from "./state.js";
-import {
-  touchedYet, markTouched, showSoundPrompt, enterFullscreen, exitFullscreen,
-} from "./screen.js";
+import { enterFullscreen, exitFullscreen } from "./screen.js";
+import { showSubtitleTrack } from "./subtitles.js";
 
 export const player = $("player");
 
@@ -18,15 +18,18 @@ const REPORT_EVERY = 5000;   // ms between position reports while playing
 let reportTimer = null;
 
 // The video on screen plays here, as opposed to being shown while it plays
-// elsewhere or not playable at all.
-export const playsHere = () => !!(state.current && state.current.playable && !player.hidden);
+// elsewhere, sent away from here, or not playable at all.
+export const playsHere = () => !!(state.current && state.current.playable && !player.hidden && !state.sentTo);
 
 // --------------------------------------------------------------- subtitles
 
 function clearTracks() {
+  showSubtitleTrack(null);
   for (const t of [...player.querySelectorAll("track")]) t.remove();
 }
 
+// The browser loads the track and keeps it hidden; player#subtitles draws it
+// (decisions#own-subtitles).
 function showTrack(video, track) {
   clearTracks();
   if (!track) return;
@@ -34,9 +37,8 @@ function showTrack(video, track) {
     kind: "subtitles", label: track.label, srclang: track.language || "und",
     src: idUrl("/subtitle/", video.id) + "?track=" + encodeURIComponent(track.id),
   });
-  node.default = true;
   player.append(node);
-  if (node.track) node.track.mode = "showing";
+  showSubtitleTrack(node);
 }
 
 // The track a video starts with: subtitles switched on stay on for the next
@@ -352,6 +354,7 @@ export function showUnplayable(reason) {
 // with its default track is sent as it is, anything else is fed piece by
 // piece.
 let loading = null;        // the latest loadPlayer call; an older one gives way
+let playedHere = false;    // whether the video loaded has played on this device
 let loadingAt = 0;         // where it starts, the position until the player knows its time
 // player#play_flash: play or pause in the middle of the video when it starts
 // or pauses here — but not when a video is being loaded, which starts and
@@ -373,6 +376,8 @@ export async function loadPlayer(video, at, play) {
   // the old source goes at once — its sound stops, and with nothing loaded
   // its time is not reported as the position
   flashQuiet = true;
+  playedHere = false;
+  player.removeAttribute("poster");
   player.removeAttribute("src");
   player.load();
   player.hidden = false;
@@ -407,43 +412,21 @@ export function currentDuration() {
 
 // ------------------------------------------------------------ sound allowed
 
-// A browser does not let a page start sound before the user has touched it:
-// a device never touched starts muted and asks for a tap
-// (decisions#start-muted). `autoMuted` tells that muting apart from the
-// user's, so sound comes back once the page has been touched.
-let autoMuted = false;
-
-function muteForPolicy() {
-  autoMuted = true;
-  player.muted = true;
-  showSoundPrompt(true);
-}
-
+// A video never plays without sound: a browser that will not let the page
+// start sound before the user touched it refuses play(), and the video stands
+// paused at its moment, shown paused on every bar, until play is pressed here
+// (decisions#sound-or-paused).
 export function startPlayback() {
-  if (!touchedYet()) muteForPolicy();
-  else if (autoMuted) {
-    autoMuted = false;
-    player.muted = false;
-    showSoundPrompt(false);
-  }
   const started = player.play();
   if (started && started.catch) {
     started.catch((e) => {
-      // refused with sound after all: muted, and the tap brings it back
-      if (e.name !== "NotAllowedError" || player.muted) return;
-      muteForPolicy();
-      player.play().catch(() => {});
+      if (e.name !== "NotAllowedError") return;
+      flashQuiet = false;
+      reportDevice();
+      notify("player");
     });
   }
 }
-
-$("tap-for-sound").addEventListener("click", () => {
-  markTouched();
-  autoMuted = false;
-  player.muted = false;
-  showSoundPrompt(false);
-  if (state.current && player.paused && !player.ended) player.play().catch(() => {});
-});
 
 // ---------------------------------------------------------------- reporting
 
@@ -491,6 +474,7 @@ function stopReporting() {
 }
 
 player.addEventListener("play", () => {
+  playedHere = true;
   if (flashQuiet) flashQuiet = false;
   else flash("play");
   stopReporting();
@@ -517,7 +501,6 @@ player.addEventListener("ended", () => {
   notify("ended");
 });
 player.addEventListener("volumechange", () => {
-  if (!player.muted) showSoundPrompt(false);
   reportLater();
   notify("player");
 });
@@ -531,22 +514,43 @@ for (const type of ["timeupdate", "loadedmetadata", "durationchange"]) {
 
 // ------------------------------------------------------------------ leaving
 
-// Stops what plays here, recording where it stopped.
-export function leave() {
+// Unloads the player: what played stops, and nothing of it is reported.
+function unload() {
   stopReporting();
-  if (playsHere() && player.currentSrc && !player.ended && player.currentTime > 0) report();
   stopStream();
-  const had = state.current !== null;
-  state.current = null;
-  state.audio = null;
-  state.subtitle = null;
   loading = null;
   player.pause();
   clearTracks();
   player.removeAttribute("src");
   player.load();
-  showSoundPrompt(false);
+}
+
+// Stops what plays here, recording where it stopped — only when it played
+// here: a video opened paused while it plays elsewhere has a position that
+// says nothing.
+export function leave() {
+  if (playsHere() && playedHere && player.currentSrc && !player.ended && player.currentTime > 0) report();
+  unload();
+  player.removeAttribute("poster");
+  const had = state.current !== null;
+  state.current = null;
+  state.audio = null;
+  state.subtitle = null;
+  state.sentTo = null;
   if (had) reportDevice();
+  notify("player");
+}
+
+// The video on screen is sent to the device `to` (behaviour#devices): the
+// player stops and lets go of it, watch stays on it under `Playing on
+// <device>` with its thumbnail, and now_playing acts on that device, playing
+// or paused, until playback is moved back.
+export function sendAway(to) {
+  if (playsHere() && player.currentSrc && !player.ended) report(currentPosition() + mediaOffset());
+  unload();
+  if (state.current) player.poster = idUrl("/thumb/", state.current.id);
+  state.sentTo = to;
+  reportDevice();
   notify("player");
 }
 
@@ -587,19 +591,7 @@ export const local = {
   },
   volume({ volume, muted }) {
     if (typeof volume === "number" && isFinite(volume)) player.volume = clamp(volume, 0, 1);
-    if (muted === true) {
-      autoMuted = false;
-      player.muted = true;
-    } else if (muted === false) {
-      // sound, unless the browser would refuse it here: then the tap does it
-      if (touchedYet()) {
-        autoMuted = false;
-        player.muted = false;
-        showSoundPrompt(false);
-      } else if (playsHere()) {
-        showSoundPrompt(true);
-      }
-    }
+    if (typeof muted === "boolean") player.muted = muted;
   },
   speed({ speed }) {
     if (typeof speed !== "number" || !(speed > 0)) return;

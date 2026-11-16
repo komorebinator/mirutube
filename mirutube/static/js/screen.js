@@ -1,43 +1,25 @@
-// The screen the page has: whether the user has touched it yet, the prompts
-// that ask for a touch, and full screen (behaviour#full-screen).
+// Full screen (behaviour#full-screen). A browser goes full screen only from
+// a touch on its own page, so it is always this page's (decisions#fullscreen-here).
 
 import { $ } from "./dom.js";
 
-// ------------------------------------------------------------------ touched
-
-// A browser does not let a page start sound, or go full screen, before the
-// user has touched it (decisions#start-muted, decisions#fullscreen-here).
-let touched = false;
-for (const type of ["pointerdown", "keydown", "touchstart"]) {
-  window.addEventListener(type, () => { touched = true; }, { capture: true, passive: true });
-}
-
-export function touchedYet() {
-  return touched || !!(navigator.userActivation && navigator.userActivation.hasBeenActive);
-}
-
-export function markTouched() {
-  touched = true;
-}
-
-// ------------------------------------------------------------------ prompts
-
-// `Tap to turn on sound` — what tapping it does is the player's.
-export function showSoundPrompt(shown) {
-  $("tap-for-sound").hidden = !shown;
-}
-
-
 // -------------------------------------------------------------- full screen
 
-// Full screen is always the whole page, so the now_playing bar and the
-// prompts stay on screen; while a video is on screen playing here
+// Full screen is always the whole page, so the now_playing bar stays on
+// screen; while a video is on screen playing here
 // (`videoHere`) the page shows it alone, filling the screen, with the bar over
 // its bottom — anywhere else it is MiruTube itself that fills the screen.
 let videoHere = false;
 
 const fullscreenElement = () => document.fullscreenElement || document.webkitFullscreenElement || null;
 export const isFullscreen = () => !!fullscreenElement();
+
+// Whether this browser can put the page in full screen, or — as on an iPhone,
+// which has full screen for a video alone — the video playing here.
+export function canFullscreen() {
+  if (document.fullscreenEnabled || document.webkitFullscreenEnabled) return true;
+  return videoHere && !!$("player").webkitEnterFullscreen;
+}
 
 // Said on every tick of the video; only a change redraws, or the bar over a
 // full-screen video would be shown again four times a second.

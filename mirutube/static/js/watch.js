@@ -61,11 +61,13 @@ player.addEventListener("click", () => {
   if (t.kind !== "none") act(t.playing ? "pause" : "play");
 });
 
-// The elsewhere state: the video on screen plays on another device. The page
-// then shows it paused here, under `Playing on <device>`, and the bar acts on
-// that device; full screen shows the video only while it plays here.
+// The elsewhere state: the video on screen plays on another device, or this
+// one sent it there and it stands paused there. The page then shows it under
+// `Playing on <device>`, and the bar acts on that device; full screen shows
+// the video only while it plays here.
 function renderElsewhere() {
-  const d = playsHere() ? elsewhereDevice() : null;
+  const sent = state.sentTo && state.devices.find((x) => x.id === state.sentTo);
+  const d = sent || (playsHere() ? elsewhereDevice() : null);
   $("elsewhere").hidden = !d;
   if (d) $("elsewhere").textContent = "Playing on " + d.name;
   setVideoHere(playsHere() && !(d && player.paused));
@@ -202,6 +204,11 @@ export async function showWatch(id) {
   if (moved) {
     video.position = moved.position;
     video.watched = false;
+    // as loud and as fast as where it was, and with sound: a video moved is
+    // meant to be heard (behaviour#devices)
+    if (typeof moved.volume === "number") player.volume = Math.min(1, Math.max(0, moved.volume));
+    if (typeof moved.speed === "number" && moved.speed > 0) player.defaultPlaybackRate = player.playbackRate = moved.speed;
+    player.muted = false;
   } else {
     const pos = await getJSON("/api/position?video=" + encodeURIComponent(id));
     if (state.current !== video) return;

@@ -1,0 +1,10 @@
+# tests#browser: the browser the page is used in — Debian's Chromium, which
+# plays H.264 and AAC as the page's `direct` videos are — headless, with its
+# DevTools on the port the test gives it.
+FROM docker.io/library/debian:trixie-slim
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends chromium fonts-dejavu-core \
+    && rm -rf /var/lib/apt/lists/*
+ENTRYPOINT ["chromium", "--headless=new", "--no-sandbox", "--no-first-run", "--disable-dev-shm-usage", \
+            "--user-data-dir=/tmp/profile", "--window-size=1280,720", \
+            "--autoplay-policy=document-user-activation-required"]

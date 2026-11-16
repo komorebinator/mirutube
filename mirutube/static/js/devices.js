@@ -10,10 +10,10 @@
 
 import { postJSON } from "./api.js";
 import {
-  state, notify, navigate, watchHref, videoOf, lastWatched, startOf,
+  state, notify, navigate, watchHref, videoOf, lastWatched, startOf, applyContinue,
 } from "./state.js";
 import {
-  player, playsHere, local, currentPosition, currentDuration, reportDevice, initialAudio, initialTrack,
+  player, playsHere, local, currentPosition, currentDuration, reportDevice, initialAudio, initialTrack, sendAway,
 } from "./player.js";
 
 let events = null;
@@ -32,6 +32,19 @@ export function openEvents() {
     notify("devices");
   });
   events.addEventListener("command", (e) => obey(JSON.parse(e.data)));
+  // the household's settings, applied as they come (store#fields#shared_settings)
+  events.addEventListener("settings", (e) => {
+    state.shared = JSON.parse(e.data);
+    notify("settings");
+  });
+  // what is coming into the library, on every device (page#fields#jobs)
+  events.addEventListener("jobs", (e) => {
+    state.jobs = JSON.parse(e.data);
+    notify("jobs");
+  });
+  // continue_row as it is now, whenever it changes on any device
+  // (behaviour#resume#scenarios#live-row)
+  events.addEventListener("continue", (e) => applyContinue(JSON.parse(e.data)));
 }
 
 export function control(id, command) {
@@ -126,11 +139,14 @@ function localTarget() {
   };
 }
 
-// The device now_playing shows and acts on: this one while its video is on
-// screen — unless it stands paused while another device plays it — else
-// another device with a video, else the video last watched, which play starts
-// here (`idle`), else nothing.
+// The device now_playing shows and acts on: the device this one sent its
+// video to, playing or paused; this one while its video is on screen —
+// unless it stands paused while another device plays it — else another
+// device with a video, else the video last watched, which play starts here
+// (`idle`), else nothing.
 export function target() {
+  const sent = state.sentTo && state.devices.find((d) => d.id === state.sentTo);
+  if (sent) return remoteTarget(sent);
   if (playsHere()) {
     const away = elsewhereDevice();
     return away && player.paused ? remoteTarget(away) : localTarget();
@@ -167,35 +183,49 @@ export function act(action, args = {}) {
 // ------------------------------------------------------------------- moving
 
 // Playback that moves here: the video goes on from `position` with these
-// tracks.
-export function playHere(video, position, audio, subtitle) {
-  state.arriving = { video, position, audio, subtitle };
+// tracks, volume and speed.
+export function playHere(video, position, audio, subtitle, volume, speed) {
+  state.arriving = { video, position, audio, subtitle, volume, speed };
   navigate(watchHref(video));
 }
 
-// Moves playback to the device `to`: the video goes on there from the same
-// moment with the same sound and subtitles, and pauses where it was. The
-// video last watched, with nothing playing, starts there with the tracks it
-// would start with here.
+// Moves playback to the device `to` (behaviour#devices): the video goes on
+// there from the same moment with the same sound, subtitles, volume and
+// speed, and the device it leaves stops — another device goes back to home,
+// this one stays on the video with its player stopped, the bar acting on
+// `to`. The video last watched, with nothing playing, starts there with the
+// tracks it would start with here.
 export function moveTo(to) {
   const t = target();
   if (t.kind === "none" || t.id === to) return;
-  const from = { id: t.id, video: t.videoId, position: t.position, audio: t.audio, subtitle: t.subtitle };
+  const from = {
+    id: t.id, video: t.videoId, position: t.position, audio: t.audio, subtitle: t.subtitle,
+    volume: typeof t.volume === "number" ? t.volume : player.volume,
+    speed: typeof t.speed === "number" ? t.speed : player.playbackRate,
+  };
   if (t.kind === "idle") {
     const a = initialAudio(t.video), s = initialTrack(t.video);
     from.audio = a && !a.default ? a.id : null;
     from.subtitle = s ? s.id : null;
   }
   pending = null; // what was expected of either device no longer holds
-  if (from.id === state.device.id) player.pause();
-  else if (from.id) control(from.id, { action: "pause" });
-  if (to === state.device.id) playHere(from.video, from.position, from.audio, from.subtitle);
-  else control(to, { action: "load", video: from.video, position: from.position, audio: from.audio, subtitle: from.subtitle });
+  if (to === state.device.id) {
+    if (from.id) control(from.id, { action: "stop" });
+    return playHere(from.video, from.position, from.audio, from.subtitle, from.volume, from.speed);
+  }
+  if (from.id === state.device.id) sendAway(to);
+  else if (from.id) control(from.id, { action: "stop" });
+  else state.sentTo = to; // the video last watched, sent from here: the bar follows it
+  control(to, {
+    action: "load", video: from.video, position: from.position, audio: from.audio, subtitle: from.subtitle,
+    volume: from.volume, speed: from.speed,
+  });
+  notify("devices");
 }
 
 // A command from another device, for this one.
 export function obey(c) {
-  if (c.action === "load") return playHere(c.video, c.position || 0, c.audio, c.subtitle);
+  if (c.action === "load") return playHere(c.video, c.position || 0, c.audio, c.subtitle, c.volume, c.speed);
   const fn = local[c.action];
   if (fn) fn(c);
 }
