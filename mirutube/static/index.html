@@ -19,7 +19,6 @@
       <img src="/static/icons/mark.svg" class="logo-mark" width="30" height="30" alt="">
       <span class="logo-name"><span class="logo-miru">Miru</span>Tube</span>
     </a>
-    <span id="address" class="address" title="Open this address on another device" hidden></span>
     <div class="popover-wrap">
       <button id="qr-button" class="icon-button" type="button" aria-label="Connect a device" title="Connect a device"
               aria-haspopup="dialog" aria-expanded="false" hidden>
@@ -30,11 +29,12 @@
         </svg>
       </button>
       <div id="qr-card" class="qr-card" role="dialog" aria-label="Connect a device" hidden>
-        <p class="qr-heading">Scan to open MiruTube on a phone or a TV</p>
+        <p class="qr-heading">Scan to open MiruTube on a phone</p>
         <img id="qr-image" class="qr-image" alt="QR code of the address" width="240" height="240">
         <p id="qr-address" class="qr-address"></p>
       </div>
     </div>
+    <span id="address" class="address" title="Open this address on another device" hidden></span>
   </div>
   <div id="search-wrap" class="search-wrap">
     <input id="search" type="search" placeholder="Search" autocomplete="off" aria-label="Search by title"
