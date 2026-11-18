@@ -601,10 +601,17 @@ body.bar-hidden, body.bar-hidden #player { cursor: none; }
   .np-thumb { width: 64px; }
 }
 @media (max-width: 600px) {
-  .top { gap: 10px; }
+  /* search on a row of its own under the logo and the buttons */
+  .top { gap: 10px; flex-wrap: wrap; row-gap: 8px; }
+  .search-wrap { order: 3; flex: 1 0 100%; }
+  .top-end { gap: 0; }
+  .top .icon-button { width: 36px; height: 36px; }
   .logo { flex: 0 0 auto; gap: 7px; }
   .logo-mark { width: 26px; height: 26px; }
   .logo-name { font-size: 17px; }
   .continue-panel { padding: 2px 12px 14px; }
   .row-arrow { display: none; }
+}
+@media (max-width: 380px) {
+  .logo-name { display: none; }
 }

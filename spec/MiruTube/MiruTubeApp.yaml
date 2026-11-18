@@ -156,7 +156,7 @@ components:
           - id: search
             type: "@UserInterfaceElement"
             placeholder: Search
-            description: "In the middle, as wide as the bar allows up to about 600px. On home it filters the grid by title as the user types. On watch it never leaves the page while the user types, so the video keeps playing: the matching playlists and videos drop down under the box, choosing one opens it, and `Enter` opens home with the query in place."
+            description: "In the middle, as wide as the bar allows up to about 600px. On a window narrower than about 600px — a phone — it moves to a row of its own under the rest of the bar, across its whole width, since the logo, qr_button and the buttons at the right fill one row there; the buttons are a little smaller there, and on the narrowest windows logo shows the mark without the name. On home it filters the grid by title as the user types. On watch it never leaves the page while the user types, so the video keeps playing: the matching playlists and videos drop down under the box, choosing one opens it, and `Enter` opens home with the query in place."
           - id: address
             type: "@UserInterfaceElement"
             description: "Just right of qr_button, in small muted type: the address other devices open this MiruTube at, `http://192.168.31.5:8800` — the server's address on the home network, from server#functions#serve_address, never `localhost`. It is the plain HTTP address, which every device can open; a device that trusts MiruTube's certificate goes on to HTTPS from there by itself (behaviour#secure-at-home). Hidden on a window narrower than about 900px, where qr_button alone stays beside logo."
