@@ -365,8 +365,9 @@ class Downloads:
             if path is None or isinstance(size, bool) or not isinstance(size, int) or size < 0:
                 raise ValueError("each file needs a path and a size")
             if "/" not in path and kind_of(path) not in ("video", "subtitle", "audio"):
-                raise NotSupported("%s is not supported: only videos, subtitles, sound tracks, torrents and "
-                                   "folders are taken" % path)
+                # a .torrent never comes here: the page starts its torrent instead
+                raise NotSupported("%s is not supported: only videos, subtitles, sound tracks and folders "
+                                   "are taken" % path)
             cleaned.append((path, size))
         if not cleaned:
             raise ValueError("no files")

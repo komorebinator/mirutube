@@ -188,7 +188,7 @@ components:
       - id: uploads_card
         type: "@UserInterfaceElement"
         label: Uploads
-        description: "A card centred over the page, in the style of install_card, opened by upload_button and by a drop on drop_zone (behaviour#uploads). At the top the two ways in: `From this PC` — `Files…` and `Folder…`, the two pickers a browser has, a `.torrent` among the files starting its torrent — and `Link`, a field taking a link to a video, a playlist, a `.torrent` or a `magnet:`. Under them `Save to`: the library folders, each with the free space on its disk, the first chosen, and no choice shown when there is one; episodes of a series the library has go to its folder whatever is chosen (downloads#functions#destination). Below, every job on every device, newest first: its title, where it goes (`→ Series/Show`), the file coming now, a progress bar, the size done of the whole, speed and time left, and peers for a torrent; `Cancel` while it is unfinished, after confirm_dialog says what it deletes; `Stop seeding` while it seeds; and `Remove from list` on a finished one, which drops it from the list and leaves its files. What it cannot take is said there with the reason, as not supported."
+        description: "A card centred over the page, in the style of install_card, opened by upload_button and by a drop on drop_zone (behaviour#uploads). At the top the two ways in, named without torrents (decisions#quiet-torrents): `From this PC` — `Files…` and `Folder…`, the two pickers a browser has, a `.torrent` among the files starting its torrent all the same — and `Link`, a field taking a link to a video or a playlist, or to a `.torrent` or a `magnet:` all the same. Under them `Save to`: the library folders, each with the free space on its disk, the first chosen, and no choice shown when there is one; episodes of a series the library has go to its folder whatever is chosen (downloads#functions#destination). Below, every job on every device, newest first: its title, where it goes (`→ Series/Show`), the file coming now, a progress bar, the size done of the whole, speed and time left, and peers for a torrent; `Cancel` while it is unfinished, after confirm_dialog says what it deletes; `Stop seeding` while it seeds; and `Remove from list` on a finished one, which drops it from the list and leaves its files. What it cannot take is said there with the reason, as not supported."
       - id: drop_zone
         type: "@UserInterfaceElement"
         label: Drop to upload
@@ -760,6 +760,11 @@ decisions:
     rejected:
       - a BitTorrent client of MiruTube's own, as the QR code and the certificates are — trackers, DHT, peer exchange, uTP and encryption make a client a project in itself, far past a few hundred lines
       - aria2c run as a program, as ffmpeg is — it can choose a torrent's files but not order them, so the first episode would not come first
+  - id: quiet-torrents
+    description: "Where MiruTube says how videos come in — uploads_card, the README — it names files, folders and links, never torrents: bringing a video in is dropping a file or pasting a link, and a `.torrent` or a `magnet:` given either way is downloaded as a torrent without being offered as a way of its own. What only a torrent has stays named where it appears, since it cannot be explained without the word: the `Seed torrents after downloading` setting, a job's `Seeding` state, `Stop seeding` and its peers."
+    rejected:
+      - "naming torrents beside files and links as a way in — how uploads_card first did it: the author wants bringing videos in to read as “drop a file”, with torrents taken quietly"
+      - "dropping seeding, or renaming it so it does not say torrent, to keep the word out entirely — considered and declined by the author: sharing back what was downloaded is kept, as it was"
   - id: incoming
     description: A download is written to `.mirutube-incoming` in its library folder, and each file moved to its place when it is complete.
     rejected:

@@ -110,7 +110,7 @@
            stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
     </button>
     <h2 id="uploads-title">Upload</h2>
-    <p class="muted">Videos come into the library from this device, a torrent or a link, and play as soon as each has
+    <p class="muted">Videos come into the library from this device or from a link, and play as soon as each has
       arrived. Every device sees what is coming.</p>
     <div class="upload-ways">
       <div class="upload-way">
@@ -119,15 +119,15 @@
           <button id="upload-files" class="button" type="button">Files…</button>
           <button id="upload-folder" class="button" type="button">Folder…</button>
         </div>
-        <p class="muted small">Videos, subtitles, sound tracks, a folder or a <code>.torrent</code> — or drop them
-          anywhere on MiruTube.</p>
+        <p class="muted small">Videos, subtitles, sound tracks or a whole folder — or drop them anywhere on
+          MiruTube.</p>
         <input id="upload-files-input" type="file" multiple hidden>
         <input id="upload-folder-input" type="file" webkitdirectory multiple hidden>
       </div>
       <form id="upload-link" class="upload-way">
         <h3>Link</h3>
         <div class="link-row">
-          <input id="link-input" type="text" placeholder="A video, a playlist, a .torrent or a magnet: link"
+          <input id="link-input" type="text" placeholder="A link to a video or a playlist"
                  aria-label="Link" autocomplete="off" spellcheck="false">
           <button type="submit" class="button primary">Add</button>
         </div>
