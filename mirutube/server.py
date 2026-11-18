@@ -100,7 +100,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 
 from mirutube import certificates, media, qr
 from mirutube.downloads import PIECE_LIMIT, TORRENT_LIMIT, Downloads, NotSupported
-from mirutube.library import Library, VIDEO_EXTENSIONS, normalise, on_host
+from mirutube.library import CATALOGUE_FILE, Library, VIDEO_EXTENSIONS, normalise, on_host
 from mirutube.store import SHARED_SETTINGS, Store
 
 DEFAULT_PORT = 8800
@@ -724,8 +724,10 @@ class Handler(BaseHTTPRequestHandler):
         (decisions#events). The page is a device from the moment it opens it
         until it closes, and for DEVICE_GRACE after (Devices). Every change to
         the devices is sent as `devices`, a command for this device as
-        `command`, the shared settings as `settings` when one changes, and
-        continue_row as `continue` when it changes (ContinueRow). The connection is watched for the page going: a closed
+        `command`, the shared settings as `settings` when one changes,
+        continue_row as `continue` when it changes (ContinueRow), and
+        `catalogue` when a scan in the background changed the catalogue
+        (library), for the page to load it again. The connection is watched for the page going: a closed
         connection ends the stream within a second, and a write that does not
         get through within EVENT_WRITE_TIMEOUT ends it too."""
         name = name.strip()[:NAME_LENGTH] or "Device"
@@ -748,7 +750,7 @@ class Handler(BaseHTTPRequestHandler):
                 if stream.closed:
                     break
                 out = b""
-                for topic in ("devices", "settings", "continue", "jobs"):
+                for topic in ("devices", "settings", "continue", "jobs", "catalogue"):
                     if topic in changed:
                         data = self.topic(topic)
                         if data is not None:
@@ -778,6 +780,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.continue_row.payload
         if topic == "jobs":
             return self.downloads.snapshot()
+        if topic == "catalogue":
+            return {}  # only that it changed: the page loads it again
         return None
 
     def announce_continue(self, also=()):
@@ -1386,11 +1390,15 @@ def make_server(library_dir=None, port=DEFAULT_PORT, host="", cache_dir=DEFAULT_
         names = certificates.default_names([bound or lan_address()])
         context = tls_context(*certificates.server_certificate(data_dir, names))
         authority_dir = data_dir
+    devices = Devices()
+    library = Library(store.library_folders(), excluded=store.excluded(),
+                      saved=os.path.join(cache_dir, CATALOGUE_FILE),
+                      on_change=lambda: devices.broadcast("catalogue"))
     handler = type("MiruTubeHandler", (Handler,), {
-        "library": Library(store.library_folders(), excluded=store.excluded()),
+        "library": library,
         "store": store,
         "slots": ViewerSlots(),
-        "devices": Devices(),
+        "devices": devices,
         "continue_row": ContinueRow(),
         "downloads": None,
         "quiet": quiet,
@@ -1401,9 +1409,8 @@ def make_server(library_dir=None, port=DEFAULT_PORT, host="", cache_dir=DEFAULT_
     server.ssl_context = context
     server.certificate_names = None if cert else names
     handler.port = server.server_address[1]
-    server.devices = handler.devices
+    server.devices = devices
     server.handler = handler
-    devices = handler.devices
     handler.downloads = Downloads(data_dir, handler.library, store.shared_settings,
                                   lambda: devices.broadcast("jobs"))
     server.downloads = handler.downloads
@@ -1606,6 +1613,9 @@ def main(argv=None):
     print("MiruTube: serving %s at %s/ (and over https on the same port)"
           % (", ".join(folders) or "nothing", address), flush=True)
     threading.Thread(target=_log_encoder, daemon=True).start()
+    # the catalogue kept by the last run is served at once, and this brings it
+    # up to date (behaviour#library-at-once)
+    handler.library.refresh()
     stop = threading.Event()
     if server.certificate_names is not None:
         threading.Thread(target=watch_address, args=(server, args.data, handler.server_address_host, stop),

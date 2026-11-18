@@ -4,11 +4,12 @@ served, and so is a direct video's plan when another sound track is chosen,
 an id not in the catalogue and a path outside the library are refused, ids are
 short and stay the same, the page is served at the address of every view, a
 position recorded is returned to another client, a file copied in appears
-after a rescan, the continue list has one entry per playlist at the video to
+after a rescan made in the background and announced to every page, a library
+made again serves the catalogue the last one saved at once, the continue list has one entry per playlist at the video to
 go on with, two event streams see each other appear, a report from one reach
 the other, a command reach only the device it names, and a closed one leave
 the list, and HTTPS and plain HTTP answer on one port (behaviour#library-only,
-behaviour#resume, behaviour#new-files, behaviour#audio-tracks,
+behaviour#resume, behaviour#new-files, behaviour#library-at-once, behaviour#audio-tracks,
 behaviour#devices, behaviour#short-links, behaviour#secure-at-home)."""
 
 import ctypes
@@ -31,7 +32,7 @@ from urllib.parse import quote
 from xml.etree import ElementTree
 
 from mirutube import qr
-from mirutube.library import RESCAN_AFTER, short_ids
+from mirutube.library import Library, RESCAN_AFTER, short_ids
 from mirutube.server import (COMMANDS_KEPT, DEVICE_GRACE, Devices, ViewerSlots, _move_old_store, continue_list,
                              is_local_request, read_config)
 from mirutube.store import Store
@@ -496,13 +497,21 @@ class Server(unittest.TestCase):
     # ---------------------------------------------------------- new files
 
     def test_file_copied_in_appears_after_a_rescan(self):
+        # decisions#background-scan: a request that finds the scan old gets the
+        # catalogue as it stands, and the scan it starts tells every page
+        stream = self.events("dev-new", "Laptop")
         self.get_json("/api/catalogue")
         target = os.path.join(self.lib, "Show", "Show - 02.mp4")
         shutil.copy(self.video, target)
         self.addCleanup(os.unlink, target)
         time.sleep(RESCAN_AFTER + 0.5)
         cat = self.get_json("/api/catalogue")
-        self.assertIn(I("library/Show/Show - 02.mp4"), cat["videos"])
+        self.assertNotIn(I("library/Show/Show - 02.mp4"), cat["videos"])
+        deadline = time.monotonic() + 10
+        while I("library/Show/Show - 02.mp4") not in cat["videos"]:
+            # an announcement left by another test's scan may come first
+            stream.wait_topic("catalogue", timeout=max(0.1, deadline - time.monotonic()))
+            cat = self.get_json("/api/catalogue")
         show = next(p for p in cat["playlists"] if p["id"] == I("library/Show"))
         self.assertEqual(show["videos"], [I("library/Show/Show - 01.mp4"), I("library/Show/Show - 02.mp4")])
 
@@ -1069,7 +1078,7 @@ class EventReader:
             pass
         self.lists = queue.Queue()
         self.command_queue = queue.Queue()
-        self.topics = {"settings": queue.Queue(), "continue": queue.Queue()}
+        self.topics = {"settings": queue.Queue(), "continue": queue.Queue(), "catalogue": queue.Queue()}
         self._seen = []
         self.thread = threading.Thread(target=self._read, daemon=True)
         self.thread.start()
@@ -1120,7 +1129,8 @@ class EventReader:
         return self.all_lists()[-1]
 
     def wait_topic(self, topic, wanted=lambda data: True, timeout=5):
-        """The first `settings` or `continue` event that `wanted` accepts."""
+        """The first `settings`, `continue` or `catalogue` event that `wanted`
+        accepts."""
         deadline = time.monotonic() + timeout
         while True:
             left = deadline - time.monotonic()
@@ -1574,6 +1584,85 @@ class LocalRequests(unittest.TestCase):
         self.assertTrue(is_local_request("::1", "::1"))
         self.assertFalse(is_local_request("192.168.31.20", "192.168.31.5"))
         self.assertFalse(is_local_request("127.0.0.2", "127.0.0.1"))
+
+
+class SavedCatalogue(unittest.TestCase):
+    """library#fields#saved_catalogue: a library made again — as the server
+    is on a restart — serves the catalogue the last one saved before its own
+    first scan ends, tells when that scan finds something new, and ignores
+    one saved for other library folders (behaviour#library-at-once)."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="mirutube-saved-")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.lib = os.path.join(self.tmp, "library")
+        os.makedirs(os.path.join(self.lib, "Show"))
+        for n in (1, 2):
+            open(os.path.join(self.lib, "Show", "Show - %02d.mp4" % n), "w").close()
+        self.saved = os.path.join(self.tmp, "cache", "catalogue.json")
+        self.probing = threading.Event()
+        self.probing.set()
+
+    def probe(self, path):
+        self.probing.wait(10)
+        return {"duration": 60.0, "container": "mov,mp4", "video_codec": "h264", "pix_fmt": "yuv420p",
+                "audio_codec": "aac", "audio": [], "subtitles": []}
+
+    def test_restart_serves_the_saved_catalogue_at_once(self):
+        first = Library([self.lib], probe=self.probe, saved=self.saved).catalogue()
+        self.assertTrue(os.path.exists(self.saved))
+        open(os.path.join(self.lib, "Show", "Show - 03.mp4"), "w").close()
+        self.probing.clear()  # the next scan cannot end until this is set
+        changed = threading.Event()
+        library = Library([self.lib], probe=self.probe, saved=self.saved, on_change=changed.set)
+        library.refresh()
+        started = time.monotonic()
+        self.assertEqual(library.catalogue(), first)
+        self.assertLess(time.monotonic() - started, 1.0)
+        self.assertFalse(changed.is_set())
+        self.probing.set()
+        self.assertTrue(changed.wait(10))
+        self.assertIn("library/Show/Show - 03.mp4", library.catalogue()["videos"])
+        # and what that scan found is what the next start begins with
+        again = Library([self.lib], probe=self.probe, saved=self.saved)
+        self.assertIn("library/Show/Show - 03.mp4", again.catalogue()["videos"])
+
+    def test_file_placed_during_a_scan_is_scanned_again(self):
+        # downloads: a file put in place while a scan runs that has passed it
+        library = Library([self.lib], probe=self.probe)
+        library.catalogue()
+        entered = threading.Event()
+        probe = self.probe
+
+        def slow(path):
+            entered.set()
+            return probe(path)
+        library.probe = slow
+        self.probing.clear()
+        library.refresh()
+        self.assertTrue(entered.wait(5))  # the folder is listed: the new file is not in this scan
+        open(os.path.join(self.lib, "Show", "Show - 03.mp4"), "w").close()
+        library.refresh(changed=True)
+        self.probing.set()
+        deadline = time.monotonic() + 10
+        while "library/Show/Show - 03.mp4" not in library.catalogue()["videos"]:
+            self.assertLess(time.monotonic(), deadline, "the file was not scanned")
+            time.sleep(0.05)
+
+    def test_saved_for_other_folders_is_not_used(self):
+        Library([self.lib], probe=self.probe, saved=self.saved).catalogue()
+        other = os.path.join(self.tmp, "other")
+        os.makedirs(other)
+        open(os.path.join(other, "Clip.mp4"), "w").close()
+        cat = Library([other], probe=self.probe, saved=self.saved).catalogue()
+        self.assertEqual(list(cat["videos"]), ["other/Clip.mp4"])
+
+    def test_unreadable_saved_catalogue_is_scanned_again(self):
+        os.makedirs(os.path.dirname(self.saved))
+        with open(self.saved, "w") as f:
+            f.write("{not json")
+        cat = Library([self.lib], probe=self.probe, saved=self.saved).catalogue()
+        self.assertIn("library/Show/Show - 01.mp4", cat["videos"])
 
 
 class FirstStart(unittest.TestCase):

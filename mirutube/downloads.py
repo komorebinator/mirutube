@@ -323,6 +323,7 @@ class Downloads:
         else:
             shutil.move(src, dest)
             f["placed"] = dest
+            self.library.refresh(changed=True)  # every page learns of it (library)
         f["done"] = True
 
     def _finish_if_complete(self, job):
@@ -595,6 +596,7 @@ class Downloads:
                     f["done"] = True
                     f.pop("moving", None)
                     self._changed(save=True)
+                    self.library.refresh(changed=True)  # every page learns of it (library)
             elif name == "file_rename_failed_alert":
                 self._fail(job, "a file could not be moved into the library: %s" % a.message())
             elif name == "save_resume_data_alert":

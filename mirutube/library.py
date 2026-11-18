@@ -2,12 +2,16 @@
 each in order, and the subtitle and sound tracks of every video. A video's
 path within the library begins with the name of its library folder.
 
-It rescans when a catalogue request finds the last scan older than a few
-seconds, which is how a video copied into the folder appears without a
-restart (behaviour#new-files).
+No request waits for a scan (decisions#background-scan): a catalogue found
+older than a few seconds is served as it stands while a scan in the
+background brings it up to date, which is how a video copied into the folder
+appears without a restart (behaviour#new-files). The last scan's catalogue is
+kept in the cache folder, so a restart shows the library at once
+(behaviour#library-at-once).
 """
 
 import hashlib
+import json
 import os
 import re
 import threading
@@ -16,6 +20,10 @@ import time
 from mirutube import media
 
 RESCAN_AFTER = 3.0  # seconds
+CATALOGUE_FILE = "catalogue.json"  # fields#saved_catalogue, in the cache folder
+# Moves on whenever what scan returns changes shape, so a catalogue kept by an
+# earlier version is scanned again rather than read.
+CATALOGUE_VERSION = 1
 
 VIDEO_EXTENSIONS = {".mp4", ".m4v", ".mkv", ".webm", ".mov", ".avi", ".wmv", ".flv",
                     ".mpg", ".mpeg", ".ts", ".m2ts", ".ogv", ".3gp", ".vob", ".divx"}
@@ -883,15 +891,36 @@ def _scan_folder(root, name, probe, is_excluded, catalogue):
 
 
 class Library:
-    """The catalogue of the library folders, rescanned when a request finds it
-    older than RESCAN_AFTER seconds, or at once when the folders or the
-    removed paths change."""
+    """The catalogue of the library folders. No request waits for a scan
+    (decisions#background-scan): the catalogue is served as it stands, and
+    one found older than RESCAN_AFTER seconds is scanned again in the
+    background, one scan at a time, `on_change` being called when the new
+    catalogue differs from the last. Only a catalogue there is none of yet —
+    on the first start, after the folders or the removed paths change, and on
+    rescan — waits for its scan.
 
-    def __init__(self, folders, probe=None, rescan_after=RESCAN_AFTER, excluded=()):
+    `saved`, the path of fields#saved_catalogue, is read once here and
+    written after every scan, so a restart starts with the catalogue the
+    last scan made (behaviour#library-at-once)."""
+
+    def __init__(self, folders, probe=None, rescan_after=RESCAN_AFTER, excluded=(), saved=None, on_change=None):
         self.probe = probe
         self.rescan_after = rescan_after
-        self._lock = threading.Lock()
+        self.saved = saved
+        self.on_change = on_change
+        self._lock = threading.Lock()       # the fields below
+        self._scan_lock = threading.Lock()  # one scan at a time
+        self._generation = 0                # moves on whenever the folders or the removed paths change
+        self._scanning = False              # a scan in the background is on its way
+        self._again = False                 # and another is to follow it (refresh)
+        self._last = None                   # the catalogue pages were last given, for on_change
         self.configure(folders, excluded)
+        kept = self._read_saved()
+        if kept is not None:
+            with self._lock:
+                self._catalogue = self._last = kept
+                # brought up to date by refresh, which the server calls as it starts
+                self._scanned_at = time.monotonic()
 
     def configure(self, folders, excluded=()):
         """Takes the library folders, in order, and the removed paths; the
@@ -903,19 +932,117 @@ class Library:
             self.excluded = list(excluded)
             self._catalogue = None
             self._scanned_at = 0.0
+            self._generation += 1
 
     def rescan(self):
-        """Scans now, rather than when the last scan is found old."""
+        """Scans now, and waits for it, rather than when the last scan is
+        found old."""
+        return self._scan(force=True)
+
+    def refresh(self, changed=False):
+        """Starts a scan in the background — as the server starts, so the
+        catalogue it was given from fields#saved_catalogue comes up to date
+        without waiting for a request, and when a catalogue is found old.
+        With `changed`, something was just put in the library (downloads): a
+        scan already running may have passed it, so another follows it."""
         with self._lock:
-            self._catalogue = None
-        return self.catalogue()
+            if self._scanning:
+                self._again = self._again or changed
+                return
+            self._scanning = True
+        threading.Thread(target=self._scan_in_background, daemon=True).start()
 
     def catalogue(self):
         with self._lock:
-            if self._catalogue is None or time.monotonic() - self._scanned_at > self.rescan_after:
-                self._catalogue = scan([on_host(f) for f in self.folders.values()], self.probe, self.excluded)
-                self._scanned_at = time.monotonic()
-            return self._catalogue
+            cat = self._catalogue
+            old = cat is not None and time.monotonic() - self._scanned_at > self.rescan_after
+        if cat is None:
+            return self._scan(force=False)
+        if old:
+            self.refresh()
+        return cat
+
+    def _scan_in_background(self):
+        while True:
+            try:
+                self._scan(force=True)
+            except Exception as e:  # a scan that failed leaves the catalogue as it was
+                print("MiruTube: the library could not be scanned: %s" % e, flush=True)
+            with self._lock:
+                if not self._again:
+                    self._scanning = False
+                    return
+                self._again = False
+
+    def _scan(self, force):
+        """Scans the library folders and puts the catalogue in place; with
+        `force` false, a catalogue another scan put in place while this one
+        waited its turn is taken instead. A scan the folders changed under is
+        made again, since its catalogue is of folders no longer the library's."""
+        with self._scan_lock:
+            while True:
+                with self._lock:
+                    if not force and self._catalogue is not None:
+                        return self._catalogue
+                    generation = self._generation
+                    names = dict(self.folders)
+                    excluded = list(self.excluded)
+                cat = scan([on_host(f) for f in names.values()], self.probe, excluded)
+                with self._lock:
+                    if generation != self._generation:
+                        continue
+                    self._catalogue = cat
+                    self._scanned_at = time.monotonic()
+                    changed = self._last is not None and self._last != cat
+                    self._last = cat
+                break
+        self._write_saved(cat, names, excluded)
+        if changed and self.on_change:
+            self.on_change()
+        return cat
+
+    # ------------------------------------------------- fields#saved_catalogue
+
+    def _read_saved(self):
+        """The catalogue fields#saved_catalogue holds, or None when there is
+        none, it cannot be read, or it was made by another version or for
+        other library folders or removed paths."""
+        if not self.saved:
+            return None
+        try:
+            with open(self.saved, encoding="utf-8") as f:
+                kept = json.load(f)
+        except (OSError, ValueError):
+            return None
+        with self._lock:
+            names, excluded = dict(self.folders), sorted(self.excluded)
+        if not isinstance(kept, dict) or kept.get("version") != CATALOGUE_VERSION \
+                or kept.get("folders") != names or sorted(kept.get("excluded") or []) != excluded:
+            return None
+        cat = kept.get("catalogue")
+        if not isinstance(cat, dict) or not all(k in cat for k in ("playlists", "videos", "standalone", "short", "paths")):
+            return None
+        return cat
+
+    def _write_saved(self, cat, names, excluded):
+        """Writes fields#saved_catalogue whole to a file beside it and renames
+        it into place, so a server stopped while writing leaves the previous
+        catalogue rather than half of one."""
+        if not self.saved:
+            return
+        temporary = self.saved + ".%d.tmp" % threading.get_ident()
+        try:
+            os.makedirs(os.path.dirname(self.saved) or os.curdir, exist_ok=True)
+            with open(temporary, "w", encoding="utf-8") as f:
+                json.dump({"version": CATALOGUE_VERSION, "folders": names, "excluded": excluded,
+                           "catalogue": cat}, f, ensure_ascii=False)
+            os.replace(temporary, self.saved)
+        except (OSError, TypeError, ValueError) as e:
+            print("MiruTube: the catalogue could not be kept: %s" % e, flush=True)
+            try:
+                os.unlink(temporary)
+            except OSError:
+                pass
 
     def video(self, vid):
         return self.catalogue()["videos"].get(vid)

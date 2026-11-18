@@ -10,7 +10,7 @@
 
 import { postJSON } from "./api.js";
 import {
-  state, notify, navigate, watchHref, videoOf, lastWatched, startOf, applyContinue,
+  state, notify, navigate, watchHref, videoOf, lastWatched, startOf, applyContinue, loadCatalogue,
 } from "./state.js";
 import {
   player, playsHere, local, currentPosition, currentDuration, reportDevice, initialAudio, initialTrack, sendAway,
@@ -45,6 +45,11 @@ export function openEvents() {
   // continue_row as it is now, whenever it changes on any device
   // (behaviour#resume#scenarios#live-row)
   events.addEventListener("continue", (e) => applyContinue(JSON.parse(e.data)));
+  // a scan in the background changed the catalogue: a video copied in, or
+  // what changed while the server was off (behaviour#library-at-once)
+  events.addEventListener("catalogue", () => {
+    loadCatalogue().then(() => notify("rescanned")).catch((e) => console.error(e));
+  });
 }
 
 export function control(id, command) {
