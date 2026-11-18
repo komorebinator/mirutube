@@ -120,7 +120,8 @@ function renderJobs() {
     $("jobs").replaceChildren(...jobs.map(jobItem));
     $("no-jobs").hidden = jobs.length > 0;
   }
-  // upload_button's ring: the progress of everything coming in, on any device
+  // upload_button's ring and the bar beside it: the progress of everything
+  // coming in, on any device
   const coming = jobs.filter((j) => ["queued", "downloading", "interrupted"].includes(j.state));
   const size = coming.reduce((n, j) => n + (j.size || 0), 0);
   const done = coming.reduce((n, j) => n + Math.min(j.done || 0, j.size || 0), 0);
@@ -129,6 +130,8 @@ function renderJobs() {
   const fill = $("upload-ring");
   fill.style.strokeDasharray = String(RING);
   fill.style.strokeDashoffset = String(RING * (1 - (size ? done / size : 0)));
+  document.querySelector(".upload-progress").hidden = coming.length === 0;
+  $("upload-progress").style.width = (size ? (100 * done / size).toFixed(1) : 0) + "%";
   $("upload-button").title = coming.length ? "Upload · " + coming.length + " coming in" : "Upload";
 }
 

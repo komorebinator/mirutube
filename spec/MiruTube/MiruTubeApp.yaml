@@ -167,11 +167,11 @@ components:
           - id: install_button
             type: "@UserInterfaceElement"
             label: Install
-            description: An icon button at the right of the bar, first of the icons there, on every device until MiruTube is installed there — never inside the installed app, and gone when the browser reports it installed. Where the browser offers to install the site itself (Chromium-based browsers tell the page so), pressing it opens the browser's own install dialog; anywhere else it opens install_card, with what this device needs first (behaviour#installable).
+            description: An icon button at the right of the bar, between upload_button and resync_button — after upload_button, so the progress bar beside that one starts the icons rather than sitting between two of them — on every device until MiruTube is installed there — never inside the installed app, and gone when the browser reports it installed. Where the browser offers to install the site itself (Chromium-based browsers tell the page so), pressing it opens the browser's own install dialog; anywhere else it opens install_card, with what this device needs first (behaviour#installable).
           - id: upload_button
             type: "@UserInterfaceElement"
             label: Upload
-            description: An icon button of an arrow rising out of a tray, before resync_button, opening uploads_card. While anything is coming in, on any device's request, a thin ring in the accent colour around it fills with the progress of everything coming, so every device sees from any page that something is on its way.
+            description: An icon button of an arrow rising out of a tray, first of the icons at the right of the bar, opening uploads_card. While anything is coming in, on any device's request, a thin ring in the accent colour around it fills with the progress of everything coming, and a short thin bar just left of it, in the same colour, fills with the same, so every device sees from any page that something is on its way and how far it has got; both are gone while nothing is coming.
           - id: resync_button
             type: "@UserInterfaceElement"
             label: Rescan library

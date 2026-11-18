@@ -42,13 +42,7 @@
     <ul id="search-results" class="search-results" hidden></ul>
   </div>
   <div class="top-end">
-    <button id="install-button" class="icon-button" type="button" aria-label="Install MiruTube as an app"
-            title="Install MiruTube as an app" hidden>
-      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor"
-           stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-        <rect x="3" y="4" width="18" height="13" rx="2.5"/><path d="M8 21h8M12 7.5v6M9.5 11l2.5 2.5 2.5-2.5"/>
-      </svg>
-    </button>
+    <span class="upload-progress" aria-hidden="true" hidden><span id="upload-progress" class="upload-progress-fill"></span></span>
     <button id="upload-button" class="icon-button upload-button" type="button" aria-label="Upload" title="Upload"
             aria-haspopup="dialog">
       <svg class="upload-ring" viewBox="0 0 40 40" aria-hidden="true" hidden>
@@ -57,6 +51,13 @@
       <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor"
            stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
         <path d="M12 15V4M7.5 8.5 12 4l4.5 4.5M4 14v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/>
+      </svg>
+    </button>
+    <button id="install-button" class="icon-button" type="button" aria-label="Install MiruTube as an app"
+            title="Install MiruTube as an app" hidden>
+      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor"
+           stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="4" width="18" height="13" rx="2.5"/><path d="M8 21h8M12 7.5v6M9.5 11l2.5 2.5 2.5-2.5"/>
       </svg>
     </button>
     <button id="resync-button" class="icon-button" type="button" aria-label="Rescan library" title="Rescan library">
