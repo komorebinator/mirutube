@@ -43,7 +43,7 @@ components:
       - id: stream_plan
         description: "How a `stream` video is cut into pieces: its duration, the start of each piece, and the MIME type the page gives Media Source Extensions. Pieces are about ten seconds long. Where the video is copied they start at the source's keyframes, the only places a copied stream can be cut; where it is transcoded they start every ten seconds, with a keyframe forced at each start."
       - id: stream_segment
-        description: "One piece of a `stream` video as fragmented MP4 that continues the one before it in time, with H.264 video and AAC sound from the chosen track — one of the file's own audio streams, or an external file from library#functions#match_audio read alongside it from the same moment. The video is the source's own when a browser decodes it and only the container or the sound is the problem, as with H.264 and E-AC3 in MKV; otherwise it is transcoded — by the first hardware encoder ffmpeg can open on this computer — NVENC, then VAAPI on each render device in turn (Linux), then QSV, AMF (AMD on Windows) and VideoToolbox (macOS) — else by libx264. NVENC comes first because a computer with an NVIDIA card often has another GPU too, and VAAPI on the first render device may be that other one; the one chosen is written to the server's log at start, so it is plain what the server runs on. A piece is made when it is asked for and not kept: making one takes a fraction of its own length."
+        description: "One piece of a `stream` video as fragmented MP4 that continues the one before it in time, with H.264 video and AAC sound from the chosen track — one of the file's own audio streams, or an external file from library#functions#match_audio read alongside it from the same moment. The video is the source's own when a browser decodes it and only the container or the sound is the problem, as with H.264 and E-AC3 in MKV; otherwise it is transcoded — by the first hardware encoder ffmpeg can open on this computer — NVENC, then VAAPI on each render device in turn (Linux), then QSV, AMF (AMD on Windows) and VideoToolbox (macOS) — else by libx264. NVENC comes first because a computer with an NVIDIA card often has another GPU too, and VAAPI on the first render device may be that other one; the one chosen is written to the server's log at start, so it is plain what the server runs on. A piece is made when it is asked for and not kept: making one takes a fraction of its own length. Its sound is read from an input of its own — the external file, or the video's file opened a second time — seeked like the video and ended by its own trim, never by the limit that stops reading the copied video (decisions#sound-input)."
   - id: store
     type: SQLite database
     src: mirutube/store.py
@@ -672,6 +672,12 @@ decisions:
     rejected:
       - the browser's own switching between a file's audio tracks (`audioTracks`) — Chrome and Firefox keep it behind a flag, so it works for almost no one
       - a separate `<audio>` element playing the dub beside a silent video — the two drift apart, and every seek and pause has to be repeated on both
+  - id: sound-input
+    description: "A piece's sound comes from an input of its own with no reading limit, even when it is a stream of the video's own file: the file is opened twice, once for the video, stopped a little after the piece, and once for the sound, which its own trim ends."
+    rejected:
+      - "the sound from the same input as a copied video, under that input's `-to` — how it was first done: ffmpeg counts `-to` for a stream it decodes from where the seek landed, the keyframe before `-ss`, not from `-ss`, so wherever that keyframe lay more than about a second and a half before the piece, the sound stopped that much early and the padding filled the end of the piece with silence; in an episode with keyframes two seconds apart a piece in two or three went quiet for half a second to a second and a half before the next"
+      - a longer reading limit — how much longer depends on where the keyframes lie, which the plan does not keep, and every piece would read past its end for nothing
+      - no reading limit on the shared input — the copied video, whose packets past the piece are only dropped, would then be read to the end of the file for every piece
   - id: events
     description: Devices learn of changes and receive commands through one Server-Sent Events stream per page, and send theirs with ordinary requests.
     rejected:
@@ -790,7 +796,7 @@ tests:
       - behaviour#series-order
       - behaviour#subtitles-found
   - id: media
-    description: on videos and subtitle files the test makes with ffmpeg — durations and codecs are read and sorted into direct, stream and unplayable; the pieces of a stream video, made from an HEVC 10-bit file with FLAC sound and from H.264 with E-AC3 in MKV, decode as H.264 and AAC and follow each other in time without a gap, and so do pieces made with a second audio stream and with an external sound file in place of the default; an embedded text track and cp1251 and UTF-8 files come out as readable WebVTT
+    description: on videos and subtitle files the test makes with ffmpeg — durations and codecs are read and sorted into direct, stream and unplayable; the pieces of a stream video, made from an HEVC 10-bit file with FLAC sound and from H.264 with E-AC3 in MKV, decode as H.264 and AAC and follow each other in time without a gap, and so do pieces made with a second audio stream and with an external sound file in place of the default; a piece from the middle of H.264 in MKV with keyframes far apart and a steady tone for sound has sound to its very end, with no silence where the keyframe before the piece lies well before it; an embedded text track and cp1251 and UTF-8 files come out as readable WebVTT
     command: python -m unittest tests.test_media
     verifies:
       - behaviour#readable-subtitles

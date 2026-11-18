@@ -593,18 +593,25 @@ def _segment_args(path, plan, index, encoder, audio=None):
         # the decoded streams there, at a time counted differently.
         args += ["-to", "%.6f" % (end + READ_PAST)]
     args += ["-i", path]
-    if sound and sound[2]:
-        # The external file is read from the same moment as the video. The
-        # two are aligned by their own timestamps, the way a player that
-        # loads an external track plays them: its time is put on the video's
-        # timeline — the video's timestamps less the video's start time —
-        # rather than started at zero by -start_at_zero.
-        ext = probe(sound[0])
-        lag = (ext.get("start_time") or 0.0) - (info.get("start_time") or 0.0)
-        args += ["-noaccurate_seek", "-itsoffset", "%.6f" % lag]
+    if sound:
+        # The sound is read from an input of its own, from the same moment as
+        # the video, and ended by its own trim (decisions#sound-input): -to on
+        # the video's input would cut a stream decoded from it counting from
+        # the keyframe the seek landed on, before the piece, and so too early.
+        args += ["-noaccurate_seek"]
+        lag = 0.0
+        if sound[2]:
+            # An external file is aligned with the video by their own
+            # timestamps, the way a player that loads an external track plays
+            # them: its time is put on the video's timeline — the video's
+            # timestamps less the video's start time — rather than started at
+            # zero by -start_at_zero.
+            ext = probe(sound[0])
+            lag = (ext.get("start_time") or 0.0) - (info.get("start_time") or 0.0)
+            args += ["-itsoffset", "%.6f" % lag]
         if seek - lag > 0:
             args += ["-ss", "%.6f" % (seek - lag)]
-        args += ["-i", sound[0]]
+        args += ["-i", sound[0] if sound[2] else path]
     args += ["-map", "0:%d" % info["video_stream"]]
     if plan["copy"]:
         # what is read before and after the piece is dropped by its timestamps
@@ -644,7 +651,7 @@ def _segment_args(path, plan, index, encoder, audio=None):
         half = AAC_FRAME / 2
         bsf = _bsf(_drop((first - half) / SAMPLE_RATE, (last - half) / SAMPLE_RATE if last else None),
                    shift)
-        args += ["-map", "%d:%d" % (1 if sound[2] else 0, sound[1]), "-af", ",".join(chain),
+        args += ["-map", "1:%d" % sound[1], "-af", ",".join(chain),
                  "-c:a", "aac", "-b:a", "160k", "-ac", "2", "-bsf:a", bsf]
     args += ["-map_metadata", "-1", "-map_chapters", "-1", "-max_muxing_queue_size", "4096",
              "-avoid_negative_ts", "disabled", "-use_editlist", "0",

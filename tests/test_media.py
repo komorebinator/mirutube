@@ -405,6 +405,24 @@ class Pieces(unittest.TestCase):
         self.assertTrue(all(b - a >= media.PIECE for a, b in zip(cuts, cuts[1:])), cuts)
         self.assertTrue(all(abs(c / 2.5025 - round(c / 2.5025)) < 0.01 for c in cuts), cuts)
 
+    def test_sound_to_the_end_of_every_piece(self):
+        # decisions#sound-input: with keyframes four seconds apart, the one
+        # before a piece's seek lies two seconds before it, and the sound
+        # must still reach the end of the piece — a steady tone, never silent
+        path = os.path.join(self.tmp, "h264 sparse keyframes.mkv")
+        ffmpeg("-f", "lavfi", "-i", "testsrc2=size=128x72:rate=24000/1001:duration=30",
+               "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=30",
+               "-c:v", "libx264", "-preset", "veryfast", "-crf", "35", "-g", "96", "-keyint_min", "96",
+               "-sc_threshold", "0", "-pix_fmt", "yuv420p", "-c:a", "eac3", "-ac", "2", path)
+        plan, pieces = self.pieces_of(path)
+        self.assertTrue(plan["copy"])
+        self.assertEqual([round(c, 2) for c in plan["cuts"]], [0, 12.01, 24.02])
+        for i, data in enumerate(pieces):
+            piece = os.path.join(self.tmp, "sparse piece %d.mp4" % i)
+            with open(piece, "wb") as f:
+                f.write(data)
+            self.assertEqual(silences(piece), [], "piece %d has silence in its sound" % i)
+
     def test_second_audio_stream(self):
         # decisions#audio-in-pieces: the other stream of the file's own, in place of the first
         streams = media.probe(self.dual)["audio"]
@@ -547,6 +565,16 @@ class EncoderOrder(unittest.TestCase):
         media._render_devices = self.saved[1]
         found = media._render_devices()
         self.assertEqual(found, sorted(found, key=lambda d: int(d.rsplit("D", 1)[1])))
+
+
+def silences(path):
+    """The silent spans of a file's sound, as (start, end) in seconds."""
+    res = subprocess.run(["ffmpeg", "-v", "info", "-nostats", "-nostdin", "-i", path, "-map", "0:a",
+                          "-af", "silencedetect=noise=-50dB:d=0.05", "-f", "null", "-"],
+                         capture_output=True, text=True)
+    starts = [float(m) for m in re.findall(r"silence_start: ([\d.]+)", res.stderr)]
+    ends = [float(m) for m in re.findall(r"silence_end: ([\d.]+)", res.stderr)]
+    return list(zip(starts, ends + [None] * (len(starts) - len(ends))))
 
 
 def probe_streams(data):
