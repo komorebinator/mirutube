@@ -2,6 +2,7 @@
 // parts tell each other that something changed, and where the page is.
 
 import { getJSON } from "./api.js";
+import { t } from "./i18n.js";
 
 export const state = {
   catalogue: null,   // page#fields#catalogue: as the server last returned it
@@ -14,7 +15,7 @@ export const state = {
   subtitle: null,    // the subtitle track shown, one of current.subtitles, or null
   arriving: null,    // {video, position, audio, subtitle, volume, speed}: playback moving here, until watch shows it
   sentTo: null,      // the device this one sent the video on screen to, which the bar then acts on
-  shared: { subtitle_size: 100, seed_torrents: false }, // page#fields#shared_settings, as the server last sent them
+  shared: { subtitle_size: 100, seed_torrents: false, language: "auto" }, // page#fields#shared_settings, as the server last sent them
   jobs: [],          // page#fields#jobs: what is coming into the library, as the server last sent it
 };
 
@@ -23,7 +24,8 @@ export const state = {
 // The parts listen for what concerns them rather than calling each other:
 // `catalogue`, `devices`, `player` (what the local video does), `tracks`,
 // `route`, `ended`, `settings` (the shared settings), `continue`
-// (continue_row changed on some device) and `jobs` (what is coming in).
+// (continue_row changed on some device), `jobs` (what is coming in) and
+// `language` (the language in use changed: what was drawn is drawn again).
 const listeners = new Map();
 
 export function listen(name, fn) {
@@ -220,11 +222,11 @@ export function store(area, key, value) {
 export function defaultDeviceName(ua = (navigator && navigator.userAgent) || "") {
   const browser = /Edg\//.test(ua) ? "Edge" : /OPR\//.test(ua) ? "Opera"
     : /Firefox\/|FxiOS/.test(ua) ? "Firefox" : /Chrome\/|CriOS/.test(ua) ? "Chrome"
-      : /Safari\//.test(ua) ? "Safari" : "Browser";
+      : /Safari\//.test(ua) ? "Safari" : t("Browser");
   const os = /Android/.test(ua) ? "Android" : /iPhone|iPad|iPod/.test(ua) ? "iOS"
     : /CrOS/.test(ua) ? "ChromeOS" : /Windows/.test(ua) ? "Windows"
       : /Macintosh|Mac OS X/.test(ua) ? "macOS" : /Linux/.test(ua) ? "Linux" : "";
-  return os ? `${browser} on ${os}` : browser;
+  return os ? t("{} on {}", browser, os) : browser;
 }
 
 function newDeviceId() {

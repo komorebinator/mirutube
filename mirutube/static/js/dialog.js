@@ -6,6 +6,7 @@
 // device's new name is asked for in it, with a text field.
 
 import { $, el } from "./dom.js";
+import { t, fromServer } from "./i18n.js";
 
 const backdrop = $("dialog");
 const card = backdrop.querySelector(".dialog-card");
@@ -23,7 +24,7 @@ function close(answer) {
 // makes it red — and `cancel`, or none for a message alone; with `value`, a
 // text field holding it. Answers true, the field's text, or null when
 // cancelled.
-function open({ title, text, action = "OK", cancel = "Cancel", danger = false, value = null }) {
+function open({ title, text, action = t("OK"), cancel = t("Cancel"), danger = false, value = null }) {
   close(null);
   const field = value === null ? null
     : el("input", { type: "text", class: "dialog-field", value, "aria-label": title, spellcheck: "false" });
@@ -65,9 +66,9 @@ export async function confirmAction(options) {
   return (await open(options)) === true;
 }
 
-// A message with a single OK.
+// A message with a single OK; `text` may be what the server said.
 export async function tell(title, text) {
-  await open({ title, text, action: "OK", cancel: null });
+  await open({ title, text: fromServer(text), action: t("OK"), cancel: null });
 }
 
 // The text the user typed, or null.

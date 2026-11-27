@@ -4,6 +4,8 @@
 // that trusts MiruTube's certificate.
 
 import { $, el } from "./dom.js";
+import { t } from "./i18n.js";
+import { listen } from "./state.js";
 
 const PROBE_TIMEOUT = 3000; // ms the HTTPS probe may take
 
@@ -65,8 +67,13 @@ window.addEventListener("appinstalled", () => {
   $("install-button").hidden = true;
   closeCard();
 });
+function showCard() {
+  openCard();
+  $("install-close").focus();
+}
+
 $("install-button").addEventListener("click", async () => {
-  if (!installPrompt) return openCard();
+  if (!installPrompt) return showCard();
   const offered = installPrompt;
   installPrompt = null;
   await offered.prompt();
@@ -146,13 +153,13 @@ const INSTALL = {
 
 function list(items) {
   const ol = el("ol");
-  ol.innerHTML = items.map((s) => "<li>" + s + "</li>").join("");
+  ol.innerHTML = items.map((s) => "<li>" + t(s) + "</li>").join("");
   return ol;
 }
 
 function certificateSteps(key) {
   const [title, items] = CERTIFICATE[key];
-  return [el("h4", { text: title }), list(items)];
+  return [el("h4", { text: t(title) }), list(items)];
 }
 
 export function openCard() {
@@ -167,10 +174,9 @@ export function openCard() {
     $("certificate-other").open = false;
   }
   const step = el("p", { class: "install-how" });
-  step.innerHTML = (needsHttps ? "Once MiruTube is open over HTTPS: " : "") + INSTALL[platform()];
+  step.innerHTML = (needsHttps ? t("Once MiruTube is open over HTTPS: ") : "") + t(INSTALL[platform()]);
   $("install-steps").replaceChildren(step);
   $("install-card").hidden = false;
-  $("install-close").focus();
 }
 
 function closeCard() {
@@ -189,12 +195,17 @@ $("certificate-open").addEventListener("click", () => location.assign(httpsHref(
 // ------------------------------------------------------------- settings
 
 function renderSettings() {
-  $("install-state").textContent = installed()
+  $("install-state").textContent = t(installed()
     ? "MiruTube runs here as an installed app."
     : location.protocol === "https:"
       ? "This device opens MiruTube over HTTPS, so it can be installed here as an app."
       : local()
         ? "This is the computer MiruTube runs on: it can be installed here as an app without a certificate."
-        : "This device opens MiruTube over plain HTTP. To install it as an app, install MiruTube’s certificate first.";
+        : "This device opens MiruTube over plain HTTP. To install it as an app, install MiruTube’s certificate first.");
 }
-$("install-open").addEventListener("click", openCard);
+$("install-open").addEventListener("click", showCard);
+
+listen("language", () => {
+  renderSettings();
+  if (!$("install-card").hidden) openCard();
+});

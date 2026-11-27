@@ -15,6 +15,7 @@ import { setVideoHere } from "./screen.js";
 import { target, act, elsewhereDevice } from "./devices.js";
 import { thumbBox } from "./home.js";
 import { detailsRows } from "./format.js";
+import { t } from "./i18n.js";
 
 const COUNTDOWN = 5;       // seconds before the next video starts
 
@@ -31,7 +32,7 @@ export function cancelCountdown() {
 function startCountdown(next) {
   cancelCountdown();
   let left = COUNTDOWN;
-  const show = () => { $("countdown-text").textContent = `Next: ${next.title} in ${left}`; };
+  const show = () => { $("countdown-text").textContent = t("Next: {} in {}", next.title, left); };
   show();
   $("countdown").hidden = false;
   countdownTimer = setInterval(() => {
@@ -69,7 +70,7 @@ function renderElsewhere() {
   const sent = state.sentTo && state.devices.find((x) => x.id === state.sentTo);
   const d = sent || (playsHere() ? elsewhereDevice() : null);
   $("elsewhere").hidden = !d;
-  if (d) $("elsewhere").textContent = "Playing on " + d.name;
+  if (d) $("elsewhere").textContent = t("Playing on {}", d.name);
   setVideoHere(playsHere() && !(d && player.paused));
 }
 
@@ -108,8 +109,8 @@ function renderPlaylist(video) {
     const v = state.catalogue.videos[id];
     const meta = el("div", { class: "item-meta" },
       el("span", { text: formatTime(v.duration) }),
-      el("span", { class: "watched-mark", title: "Watched" }));
-    if (!v.playable) meta.append(el("span", { class: "not-playable", text: "Can't play in the browser" }));
+      el("span", { class: "watched-mark", title: t("Watched") }));
+    if (!v.playable) meta.append(el("span", { class: "not-playable", text: t("Can't play in the browser") }));
     return el("li", { "data-id": id },
       el("a", { href: watchHref(id) },
         thumbBox(id, { small: true }),
@@ -143,6 +144,7 @@ function renderDetails(video) {
 }
 
 let detailsFor = null;     // "<video>|<audio>" the details shown are of
+let detailsShown = null;   // those details, as /api/details returned them
 
 export async function loadMediaDetails(video) {
   const audio = state.audio && !state.audio.default ? state.audio.id : null;
@@ -164,6 +166,7 @@ export async function loadMediaDetails(video) {
 }
 
 export function renderMediaDetails(details) {
+  detailsShown = details;
   $("media-details").replaceChildren(...detailsRows(details).flatMap(([label, text]) => [
     el("dt", { text: label }), el("dd", { text }),
   ]));
@@ -172,6 +175,15 @@ export function renderMediaDetails(details) {
 // another sound track can change how the video reaches the browser
 listen("tracks", () => {
   if (onWatch() && state.current) loadMediaDetails(state.current);
+});
+
+// the language changed: what the view wrote is written again, the video
+// playing on
+listen("language", () => {
+  if (!onWatch() || !state.current || videoOf(state.current.id) !== state.current) return;
+  renderPlaylist(state.current);
+  renderElsewhere();
+  if (detailsShown) renderMediaDetails(detailsShown);
 });
 
 // -------------------------------------------------------------------- views
@@ -187,7 +199,7 @@ export async function showWatch(id) {
   await loadCatalogue();
   const video = videoOf(id);
   if (!video) {
-    $("video-title").textContent = "This video is no longer in the library.";
+    $("video-title").textContent = t("This video is no longer in the library.");
     $("playlist-link").hidden = true;
     $("media-details").replaceChildren();
     detailsFor = null;

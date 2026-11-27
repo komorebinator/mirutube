@@ -9,8 +9,10 @@
 // Plain modules, served as they are: each part of the page is a module of
 // its own under js/, and they tell each other of changes through state.js.
 
+// first, so it reads index.html's words before any part writes over them
+import { setLanguage, onLanguage } from "./js/i18n.js";
 import { $ } from "./js/dom.js";
-import { state, setRouter, currentRoute, notify, loadCatalogue, navigate } from "./js/state.js";
+import { state, setRouter, currentRoute, notify, listen, loadCatalogue, navigate } from "./js/state.js";
 import { checkSecure } from "./js/install.js";
 import { closeResults, showAddress } from "./js/topbar.js";
 import { showHome } from "./js/home.js";
@@ -69,6 +71,11 @@ document.addEventListener("click", (e) => {
 
 // an address of the earlier form, #/watch/<...>, opens home
 if (location.hash.startsWith("#/")) history.replaceState(null, "", "/");
+
+// the household's language, applied as it comes (behaviour#languages): every
+// part draws again what it drew
+listen("settings", () => setLanguage(state.shared.language));
+onLanguage(() => notify("language"));
 
 setRouter(route);
 window.addEventListener("popstate", route);

@@ -10,6 +10,7 @@ import { getJSON, request } from "./api.js";
 import { confirmAction, tell } from "./dialog.js";
 import { state, listen, notify, loadCatalogue } from "./state.js";
 import { formatSize } from "./format.js";
+import { t, tn, formatNumber, fromServer } from "./i18n.js";
 
 const PIECE = 8 * 1024 * 1024;   // bytes in one piece of a file
 const RETRY_AFTER = 3000;        // ms before a piece that did not get through is sent again
@@ -30,7 +31,7 @@ async function loadFolders() {
   const select = $("upload-folder-select");
   const chosen = select.value;
   select.replaceChildren(...folders.map((f) => el("option", {
-    value: f.name, text: f.name + (typeof f.free === "number" ? " — " + formatSize(f.free) + " free" : ""),
+    value: f.name, text: f.name + (typeof f.free === "number" ? " — " + t("{} free", formatSize(f.free)) : ""),
   })));
   if (folders.some((f) => f.name === chosen)) select.value = chosen;
   // nothing to choose with one folder; episodes of a series the library has
@@ -53,7 +54,7 @@ function closeUploads() {
 }
 
 function showError(message) {
-  $("upload-error").textContent = message || "";
+  $("upload-error").textContent = fromServer(message) || "";
   $("upload-error").hidden = !message;
 }
 
@@ -73,9 +74,9 @@ const STATES = {
 
 function timeLeft(seconds) {
   if (!seconds || !isFinite(seconds)) return "";
-  if (seconds < 60) return "less than a minute left";
-  if (seconds < 3600) return Math.round(seconds / 60) + " min left";
-  return (seconds / 3600).toFixed(1) + " h left";
+  if (seconds < 60) return t("less than a minute left");
+  if (seconds < 3600) return t("{} min left", formatNumber(Math.round(seconds / 60)));
+  return t("{} h left", formatNumber(seconds / 3600, 1));
 }
 
 function jobItem(job) {
@@ -84,27 +85,27 @@ function jobItem(job) {
   const meta = [
     job.current,
     job.kind === "link" ? (job.state === "done" ? "" : Math.round(fraction * 100) + "%")
-      : job.size ? formatSize(job.done) + " of " + formatSize(job.size) : "",
-    job.speed ? formatSize(job.speed) + "/s" : "",
+      : job.size ? t("{} of {}", formatSize(job.done), formatSize(job.size)) : "",
+    job.speed ? t("{}/s", formatSize(job.speed)) : "",
     job.state === "downloading" ? timeLeft(job.eta) : "",
-    job.kind === "torrent" && typeof job.peers === "number" && job.state !== "done" ? job.peers + " peers" : "",
-    job.state === "seeding" && job.uploaded ? formatSize(job.uploaded) + " seeded" : "",
-    job.device ? "from " + job.device : "",
+    job.kind === "torrent" && typeof job.peers === "number" && job.state !== "done" ? tn(job.peers, "{} peer", "{} peers") : "",
+    job.state === "seeding" && job.uploaded ? t("{} seeded", formatSize(job.uploaded)) : "",
+    job.device ? t("from {}", job.device) : "",
   ].filter(Boolean).join(" · ");
   const actions = [];
-  if (unfinished) actions.push(button("Cancel", () => cancel(job)));
-  if (job.state === "seeding") actions.push(button("Stop seeding", () => act("stop-seeding", job)));
-  if (["done", "failed", "cancelled"].includes(job.state)) actions.push(button("Remove from list", () => act("dismiss", job)));
+  if (unfinished) actions.push(button(t("Cancel"), () => cancel(job)));
+  if (job.state === "seeding") actions.push(button(t("Stop seeding"), () => act("stop-seeding", job)));
+  if (["done", "failed", "cancelled"].includes(job.state)) actions.push(button(t("Remove from list"), () => act("dismiss", job)));
   const bar = el("div", { class: "job-bar" }, el("div"));
   bar.firstChild.style.width = (fraction * 100).toFixed(1) + "%";
   return el("li", { class: "job", "data-id": job.id },
     el("div", { class: "job-head" },
       el("span", { class: "job-title", text: job.title, title: job.title }),
-      el("span", { class: "job-state" + (job.state === "failed" ? " failed" : ""), text: STATES[job.state] || job.state })),
+      el("span", { class: "job-state" + (job.state === "failed" ? " failed" : ""), text: STATES[job.state] ? t(STATES[job.state]) : job.state })),
     job.into ? el("div", { class: "job-into", text: "→ " + job.into }) : null,
     ["seeding", "done", "cancelled"].includes(job.state) ? null : bar,
     meta ? el("div", { class: "job-meta", text: meta }) : null,
-    job.reason ? el("div", { class: "job-reason", text: job.reason }) : null,
+    job.reason ? el("div", { class: "job-reason", text: fromServer(job.reason) }) : null,
     actions.length ? el("div", { class: "job-actions" }, ...actions) : null);
 }
 
@@ -132,7 +133,7 @@ function renderJobs() {
   fill.style.strokeDashoffset = String(RING * (1 - (size ? done / size : 0)));
   document.querySelector(".upload-progress").hidden = coming.length === 0;
   $("upload-progress").style.width = (size ? (100 * done / size).toFixed(1) : 0) + "%";
-  $("upload-button").title = coming.length ? "Upload · " + coming.length + " coming in" : "Upload";
+  $("upload-button").title = coming.length ? t("Upload · {} coming in", formatNumber(coming.length)) : t("Upload");
 }
 
 // A file that arrived is in the library: the catalogue is read again, so
@@ -154,16 +155,16 @@ listen("jobs", async () => {
 
 async function cancel(job) {
   const sure = await confirmAction({
-    title: "Cancel this download?",
-    text: `Everything “${job.title}” brought is deleted, what is already in the library included. Files that were there before stay.`,
-    action: "Cancel download", danger: true,
+    title: t("Cancel this download?"),
+    text: t("Everything “{}” brought is deleted, what is already in the library included. Files that were there before stay.", job.title),
+    action: t("Cancel download"), danger: true,
   });
   if (sure) await act("cancel", job);
 }
 
 async function act(action, job) {
   const r = await request("/api/downloads/" + action, { job: job.id });
-  if (!r.ok) await tell("It could not be done", r.error);
+  if (!r.ok) await tell(t("It could not be done"), r.error);
 }
 
 // ------------------------------------------------------------- sending files
@@ -174,13 +175,13 @@ async function send(entries) {
   showError(null);
   if (!folders.length) await loadFolders(); // chosen before the card had read them
   const folder = chosenFolder();
-  if (!folder) return showError("There is no library folder yet: add one in Settings, on the computer MiruTube runs on.");
+  if (!folder) return showError(t("There is no library folder yet: add one in Settings, on the computer MiruTube runs on."));
   const torrents = entries.filter((x) => /\.torrent$/i.test(x.path) && !x.path.includes("/"));
   const files = entries.filter((x) => !torrents.includes(x));
-  for (const t of torrents) {
+  for (const torrent of torrents) {
     const r = await fetch("/api/downloads/torrent?folder=" + encodeURIComponent(folder)
-      + "&device=" + encodeURIComponent(state.device.id), { method: "PUT", body: t.file });
-    if (!r.ok) showError(t.path + ": " + (await r.text()));
+      + "&device=" + encodeURIComponent(state.device.id), { method: "PUT", body: torrent.file });
+    if (!r.ok) showError(torrent.path + ": " + fromServer(await r.text()));
   }
   if (files.length) upload(files, folder);
 }
@@ -213,7 +214,7 @@ async function upload(entries, folder) {
         await new Promise((ok) => setTimeout(ok, RETRY_AFTER));
       } else {
         // cancelled, from here or another device, or refused: it stops
-        if (res.status !== 422 && res.status !== 404) showError(file.name + ": " + (await res.text()));
+        if (res.status !== 422 && res.status !== 404) showError(file.name + ": " + fromServer(await res.text()));
         return;
       }
     }
@@ -276,6 +277,12 @@ window.addEventListener("drop", async (e) => {
   openUploads();
   await loadFolders();
   send(plain || (await Promise.all(roots.map((entry) => walk(entry, "")))).flat());
+});
+
+// the language changed: the card and the button say it again
+listen("language", () => {
+  renderJobs();
+  if (!card.hidden) loadFolders();
 });
 
 // Every file under a dropped entry, with its path from the entry's own name.

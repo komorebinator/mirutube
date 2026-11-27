@@ -2,8 +2,8 @@
 it, and its page used in headless Chromium — from tests/browser, a container
 of its own — as devices, each a browser context of its own: moving playback
 and what comes with it, a device never touched, full screen, subtitles above
-the bar and their size, Continue watching following another device, and an
-upload from the page.
+the bar and their size, Continue watching following another device, an
+upload from the page, and the household's language.
 
 Needs Podman; skipped where there is none."""
 
@@ -101,9 +101,13 @@ class Page(unittest.TestCase):
 
     # ------------------------------------------------------------ devices
 
-    def device(self, name):
-        """A device of its own, named `name`, at home and never touched."""
+    def device(self, name, languages=None):
+        """A device of its own, named `name`, at home and never touched;
+        with `languages`, a browser preferring them, `ru-RU,ru`."""
         page = self.browser.new_device()
+        if languages:
+            ua = page.eval("navigator.userAgent")
+            page.send("Emulation.setUserAgentOverride", userAgent=ua, acceptLanguage=languages)
         # it leaves what it plays before it goes: a closed tab stays in the
         # devices list for a few seconds, as a reload must not drop it
         self.addCleanup(page.close)
@@ -257,3 +261,32 @@ class Page(unittest.TestCase):
             self.assertEqual(a.read(), b.read())
         phone.wait("[...document.querySelectorAll('#jobs .job-state')].some((x) => x.textContent === 'Done')",
                    message="the upload is not shown as done")
+
+    def test_the_household_chooses_the_language(self):
+        # behaviour#languages#scenarios#browser-language, #household and #message
+        self.addCleanup(self.post, "/api/settings/shared", {"language": "auto"})
+        self.assertEqual(self.post("/api/settings/shared", {"language": "auto"})[0], 200)
+        heading = "document.getElementById('library-heading').textContent"
+        tv = self.device("TV language")
+        russian = self.device("Phone in Russian", languages="ru-RU,ru")
+        tv.wait("document.documentElement.lang === 'en' && %s === 'Library'" % heading,
+                message="a browser preferring English does not show MiruTube in English")
+        russian.wait("document.documentElement.lang === 'ru' && %s === 'Библиотека'" % heading,
+                     message="a browser preferring Russian does not show MiruTube in Russian")
+        self.assertEqual(russian.eval("document.getElementById('search').placeholder"), "Поиск")
+        laptop = self.device("Laptop language")
+        laptop.goto(self.base + "/settings")
+        laptop.wait("!!document.querySelector('#language button[lang=ru]')")
+        # below the fold of the settings page: brought into view, as a user scrolls to it
+        laptop.eval("document.getElementById('language').scrollIntoView({block: 'center'})")
+        laptop.click("#language button[lang=ru]")
+        laptop.wait("document.documentElement.lang === 'ru' && document.title.startsWith('Настройки')",
+                    message="Russian chosen in settings did not turn the page Russian")
+        tv.wait("document.documentElement.lang === 'ru' && %s === 'Библиотека'" % heading,
+                message="Russian chosen on another device did not reach the TV")
+        # a refusal from the server is said in Russian, what it names kept
+        laptop.eval("document.getElementById('folder-path').value = '/no/such/folder/here';"
+                    "document.getElementById('add-folder').scrollIntoView({block: 'center'})")
+        laptop.click("#add-folder button[type=submit]")
+        laptop.wait("document.getElementById('folders-error').textContent === 'Не удалось добавить: нет такой папки'",
+                    message="the server's refusal is not said in Russian")

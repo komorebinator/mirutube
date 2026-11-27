@@ -40,7 +40,7 @@ Routes:
                                       the page's event stream (Server-Sent Events):
                                       `devices` {now, devices: [device...]} on every change,
                                       `command` {action, ...} for this device alone,
-                                      `settings` {subtitle_size, seed_torrents} when one changes,
+                                      `settings` {subtitle_size, seed_torrents, language} when one changes,
                                       `continue` {continue: [video...], videos: {id: {position,
                                       watched}}, version} when continue_row changes,
                                       `jobs` [job...] when a download changes, at most once a second
@@ -55,7 +55,7 @@ Routes:
                                       {device, action: load, video, position, audio|null,
                                        subtitle|null, volume?, speed?} -> {ok}
   GET  /api/settings                  {local, library_folders: [{name, folder, free}...],
-                                       excluded: [...], shared: {subtitle_size, seed_torrents}}
+                                       excluded: [...], shared: {subtitle_size, seed_torrents, language}}
   POST /api/settings/shared           {<setting>: value, ...} -> shared settings; from any device
   POST /api/settings/library-folders  {action: add|remove, folder} -> settings;
                                       from the computer MiruTube runs on alone

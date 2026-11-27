@@ -6,6 +6,7 @@
 import { confirmAction, tell } from "./dialog.js";
 import { $, el, formatTime } from "./dom.js";
 import { idUrl, request } from "./api.js";
+import { t, tn, language } from "./i18n.js";
 import {
   state, listen, loadCatalogue, watchHref, entryOf, episodeOf, titleInPlaylist, playlistOf, byTitle,
 } from "./state.js";
@@ -64,7 +65,7 @@ function card(href, title, thumb, labels, removeLabel, onRemove, extraClass = ""
 }
 
 function videoCard(v, title, removeLabel, onRemove) {
-  const label = v.playable ? null : el("div", { class: "card-label not-playable", text: "Can't play in the browser" });
+  const label = v.playable ? null : el("div", { class: "card-label not-playable", text: t("Can't play in the browser") });
   return card(watchHref(v.id), title, thumbBox(v.id, { badge: formatTime(v.duration), progress: progressOf(v) }),
     [label], removeLabel, onRemove, v.playable ? "" : " unplayable");
 }
@@ -72,12 +73,12 @@ function videoCard(v, title, removeLabel, onRemove) {
 function playlistCard(p) {
   const count = p.videos.length;
   const what = p.series
-    ? `Series · ${count} episode${count === 1 ? "" : "s"}`
-    : `Playlist · ${count} video${count === 1 ? "" : "s"}`;
+    ? tn(count, "Series · {} episode", "Series · {} episodes")
+    : tn(count, "Playlist · {} video", "Playlist · {} videos");
   return card(watchHref(entryOf(p)), p.title,
     thumbBox(p.videos[0], { badge: formatTime(p.duration), progress: playlistProgress(p) }),
     [el("div", { class: "card-label", text: what })],
-    "Remove from library", () => removeFromLibrary(p.id, p.title, "folder"));
+    t("Remove from library"), () => removeFromLibrary(p.id, p.title, "folder"));
 }
 
 // ------------------------------------------------------------------ removing
@@ -94,13 +95,14 @@ export async function forget(video) {
   const p = playlistOf(video);
   const title = p ? p.title : video.title;
   const sure = await confirmAction({
-    title: "Remove from Continue watching?",
-    text: `“${title}” leaves the row. Its progress is forgotten, and ${p ? "its videos count" : "it counts"} as not started.`,
-    action: "Forget", danger: true,
+    title: t("Remove from Continue watching?"),
+    text: p ? t("“{}” leaves the row. Its progress is forgotten, and its videos count as not started.", title)
+      : t("“{}” leaves the row. Its progress is forgotten, and it counts as not started.", title),
+    action: t("Forget"), danger: true,
   });
   if (!sure) return false;
   const r = await request("/api/forget", p ? { playlist: p.id } : { video: video.id });
-  if (!r.ok) await tell("It could not be removed", r.error);
+  if (!r.ok) await tell(t("It could not be removed"), r.error);
   await afterChange();
   return r.ok;
 }
@@ -110,13 +112,15 @@ export async function forget(video) {
 // lists it to bring back.
 export async function removeFromLibrary(id, title, kind) {
   const sure = await confirmAction({
-    title: "Remove from the library?",
-    text: `“${title}” leaves the library. Nothing is deleted from the disk: the ${kind} can be brought back in Settings.`,
-    action: "Remove", danger: true,
+    title: t("Remove from the library?"),
+    text: kind === "folder"
+      ? t("“{}” leaves the library. Nothing is deleted from the disk: the folder can be brought back in Settings.", title)
+      : t("“{}” leaves the library. Nothing is deleted from the disk: the video can be brought back in Settings.", title),
+    action: t("Remove"), danger: true,
   });
   if (!sure) return false;
   const r = await request("/api/library/remove", { id });
-  if (!r.ok) await tell("It could not be removed", r.error);
+  if (!r.ok) await tell(t("It could not be removed"), r.error);
   await afterChange();
   return r.ok;
 }
@@ -174,10 +178,10 @@ export function applySearch() {
 
 // A continue_row card, marked with its video and with what it shows, so a
 // change to the row redraws only the cards that changed.
-const shownAs = (v) => JSON.stringify([v.id, titleInPlaylist(v), v.position || 0, !!v.watched, v.playable]);
+const shownAs = (v) => JSON.stringify([language(), v.id, titleInPlaylist(v), v.position || 0, !!v.watched, v.playable]);
 
 function continueCard(v) {
-  const c = videoCard(v, titleInPlaylist(v), "Remove from Continue watching", () => forget(v));
+  const c = videoCard(v, titleInPlaylist(v), t("Remove from Continue watching"), () => forget(v));
   c.dataset.id = v.id;
   c.dataset.shown = shownAs(v);
   return c;
@@ -229,20 +233,20 @@ function render() {
   drawRow();
   const heading = $("library-heading");
   if (narrowedTo === null) {
-    heading.replaceChildren("Library");
+    heading.replaceChildren(t("Library"));
     // playlists first, each group by name
     const playlists = [...cat.playlists].sort(byTitle);
     const videos = cat.standalone.map((id) => cat.videos[id]).sort(byTitle);
     $("grid").replaceChildren(...playlists.map(playlistCard),
-      ...videos.map((v) => videoCard(v, v.title, "Remove from library", () => removeFromLibrary(v.id, v.title, "video"))));
+      ...videos.map((v) => videoCard(v, v.title, t("Remove from library"), () => removeFromLibrary(v.id, v.title, "video"))));
   } else {
     const p = cat.playlists.find((x) => x.id === narrowedTo);
-    heading.replaceChildren(el("a", { href: "/", class: "crumb", text: "Library" }), " › ",
-      p ? p.title : "This playlist is no longer in the library");
+    heading.replaceChildren(el("a", { href: "/", class: "crumb", text: t("Library") }), " › ",
+      p ? p.title : t("This playlist is no longer in the library"));
     $("grid").replaceChildren(...(p ? p.videos.map((id) => {
       const v = cat.videos[id];
       const ep = episodeOf(v);
-      return videoCard(v, ep ? `${ep} · ${v.title}` : v.title, "Remove from library",
+      return videoCard(v, ep ? `${ep} · ${v.title}` : v.title, t("Remove from library"),
         () => removeFromLibrary(v.id, v.title, "video"));
     }) : []));
   }
@@ -263,4 +267,7 @@ export async function showHome(playlist = null) {
 listen("query", applySearch);
 listen("rescanned", () => {
   if (!$("home").hidden && state.catalogue) render();
+});
+listen("language", () => {
+  if (!$("home").hidden && state.catalogue && shownOnce) render();
 });

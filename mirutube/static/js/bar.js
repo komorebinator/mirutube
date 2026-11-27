@@ -11,6 +11,7 @@ import {
 import { player, MSE } from "./player.js";
 import { isFullscreen, holdBar, canFullscreen } from "./screen.js";
 import { target, act, moveTo, openEvents } from "./devices.js";
+import { t as tr, language, fromServer } from "./i18n.js";
 
 const bar = $("now-playing");
 const seek = $("np-seek");
@@ -34,12 +35,12 @@ export function render() {
 
   // the video, and where it plays
   const v = t.video;
-  const title = v ? titleInPlaylist(v) : t.videoId ? t.videoId.split("/").pop() : "Nothing playing";
+  const title = v ? titleInPlaylist(v) : t.videoId ? t.videoId.split("/").pop() : tr("Nothing playing");
   $("np-title").textContent = title;
   $("np-title").title = title;
-  $("np-where").textContent = t.kind === "local" ? "on this device"
-    : t.kind === "remote" ? "on " + t.name + (t.playing ? "" : " · Paused")
-      : t.kind === "idle" ? "Last watched" : "";
+  $("np-where").textContent = t.kind === "local" ? tr("on this device")
+    : t.kind === "remote" ? tr("on {}", t.name) + (t.playing ? "" : " · " + tr("Paused"))
+      : t.kind === "idle" ? tr("Last watched") : "";
   const thumb = $("np-thumb");
   if (thumb.dataset.video !== (t.videoId || "")) {
     thumb.dataset.video = t.videoId || "";
@@ -67,8 +68,8 @@ export function render() {
   const toggle = $("np-toggle");
   toggle.disabled = t.kind === "none";
   toggle.classList.toggle("playing", !!t.playing);
-  toggle.setAttribute("aria-label", t.playing ? "Pause" : "Play");
-  toggle.title = t.playing ? "Pause" : "Play";
+  toggle.setAttribute("aria-label", tr(t.playing ? "Pause" : "Play"));
+  toggle.title = tr(t.playing ? "Pause" : "Play");
 
   // the bar's own tools
   const local = t.kind === "local";
@@ -78,7 +79,7 @@ export function render() {
   volume.disabled = !active(t);
   const quiet = !!t.muted || t.volume === 0;
   $("np-mute").classList.toggle("muted", quiet);
-  $("np-mute").setAttribute("aria-label", quiet ? "Unmute" : "Mute");
+  $("np-mute").setAttribute("aria-label", tr(quiet ? "Unmute" : "Mute"));
   if (!volumeMoving) volume.value = String(t.muted ? 0 : t.volume === undefined ? 1 : t.volume);
   volume.style.setProperty("--progress", (Number(volume.value) * 100).toFixed(0) + "%");
   $("speed-button").disabled = !active(t);
@@ -89,8 +90,8 @@ export function render() {
   const full = isFullscreen();
   $("fullscreen-button").hidden = !canFullscreen();
   $("fullscreen-button").classList.toggle("on", full);
-  $("fullscreen-button").setAttribute("aria-label", full ? "Exit full screen" : "Full screen");
-  $("fullscreen-button").title = full ? "Exit full screen" : "Full screen";
+  $("fullscreen-button").setAttribute("aria-label", tr(full ? "Exit full screen" : "Full screen"));
+  $("fullscreen-button").title = tr(full ? "Exit full screen" : "Full screen");
 
   for (const name of Object.keys(menus)) if (!$(name + "-list").hidden) menus[name](t);
   for (const name of ["subs", "audio"]) if ($(name + "-button").disabled) closeMenu(name);
@@ -101,6 +102,7 @@ listen("player", render);
 listen("tracks", render);
 listen("route", render);
 listen("catalogue", render);
+listen("language", render);
 // a remote device's position moves on between its reports
 setInterval(() => {
   if (shown && shown.kind === "remote" && shown.playing) render();
@@ -159,6 +161,7 @@ document.addEventListener("keydown", (e) => {
 // video plays, and an entry replaced between the press and the release of
 // the mouse button never receives the click.
 function fill(list, key, build) {
+  key = language() + key;
   if (list.dataset.key === key && list.childElementCount) return;
   list.dataset.key = key;
   list.replaceChildren(...build());
@@ -172,7 +175,7 @@ function menuItem(label, checked, reason, onChoose) {
   },
   el("span", { class: "check", text: checked ? "✓" : "" }),
   el("span", { class: "label", text: label }),
-  reason ? el("span", { class: "reason", text: reason }) : null);
+  reason ? el("span", { class: "reason", text: fromServer(reason) }) : null);
   button.addEventListener("click", (e) => {
     e.stopPropagation();
     onChoose();
@@ -185,7 +188,7 @@ function menuItem(label, checked, reason, onChoose) {
 function renderSubtitles(t) {
   const tracks = t.video ? t.video.subtitles : [];
   fill($("subs-list"), JSON.stringify([t.videoId, t.subtitle || null, tracks.map((x) => [x.id, x.available])]), () => [
-    menuItem("Off", !t.subtitle, null, () => choose("subs", "subtitle", { subtitle: null })),
+    menuItem(tr("Off"), !t.subtitle, null, () => choose("subs", "subtitle", { subtitle: null })),
     ...tracks.map((track) => menuItem(track.label, t.subtitle === track.id, track.available ? null : track.reason,
       () => choose("subs", "subtitle", { subtitle: track.id })))]);
 }
@@ -221,16 +224,16 @@ function renderDevices(t) {
 function deviceItems(t) {
   const items = state.devices.map((d) => {
     const v = videoOf(d.video);
-    const what = !d.video ? "Nothing playing"
-      : (v ? titleInPlaylist(v) : d.video.split("/").pop()) + (d.playing ? "" : " · Paused");
+    const what = !d.video ? tr("Nothing playing")
+      : (v ? titleInPlaylist(v) : d.video.split("/").pop()) + (d.playing ? "" : " · " + tr("Paused"));
     const mine = d.id === state.device.id;
     const movable = t.kind !== "none" && t.id !== d.id;
     const choose = el("button", {
       type: "button", class: "device-choose", role: "menuitem", disabled: !movable,
-      title: movable ? "Play on " + d.name : null,
+      title: movable ? tr("Play on {}", d.name) : null,
     },
     el("span", { class: "device-name", text: d.name }),
-    mine ? el("span", { class: "device-mine", text: "This device" }) : null,
+    mine ? el("span", { class: "device-mine", text: tr("This device") }) : null,
     el("span", { class: "device-what", text: what }));
     choose.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -239,13 +242,13 @@ function deviceItems(t) {
     });
     const item = el("li", { class: mine ? "mine" : null }, choose);
     if (mine) {
-      const rename = el("button", { type: "button", class: "device-rename", text: "Rename" });
+      const rename = el("button", { type: "button", class: "device-rename", text: tr("Rename") });
       rename.addEventListener("click", async (e) => {
         e.stopPropagation();
         closeMenu("devices");
         const answer = await ask({
-          title: "Name this device", text: "Other devices show it under this name.",
-          action: "Rename", value: state.device.name,
+          title: tr("Name this device"), text: tr("Other devices show it under this name."),
+          action: tr("Rename"), value: state.device.name,
         });
         const name = (answer || "").trim();
         if (!name || name === state.device.name) return;
@@ -257,7 +260,7 @@ function deviceItems(t) {
     }
     return item;
   });
-  return items.length ? items : [el("li", { class: "empty", text: "Connecting…" })];
+  return items.length ? items : [el("li", { class: "empty", text: tr("Connecting…") })];
 }
 
 // ----------------------------------------------------------------- controls

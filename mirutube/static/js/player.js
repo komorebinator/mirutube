@@ -7,10 +7,11 @@
 import { $, el } from "./dom.js";
 import { getJSON, idUrl, postJSON } from "./api.js";
 import {
-  state, notify, navigate, watchHref, choiceKey, nextOf, previousOf,
+  state, notify, listen, navigate, watchHref, choiceKey, nextOf, previousOf,
 } from "./state.js";
 import { enterFullscreen, exitFullscreen } from "./screen.js";
 import { showSubtitleTrack } from "./subtitles.js";
+import { t, fromServer } from "./i18n.js";
 
 export const player = $("player");
 
@@ -274,14 +275,14 @@ async function startStream(video, at, track, stale) {
   } catch (e) {
     if (state.current === video && !stale()) {
       showUnplayable(track && !track.default && video.delivery !== "stream"
-        ? "the sound track " + track.label + " could not be loaded (" + e.message + ")"
-        : "its conversion could not be started (" + e.message + ")");
+        ? () => t("the sound track {} could not be loaded ({})", track.label, e.message)
+        : () => t("its conversion could not be started ({})", e.message));
     }
     return;
   }
   if (state.current !== video || stale()) return;
   if (!MSE || !MSE.isTypeSupported(plan.mime)) {
-    return showUnplayable("this browser cannot play it converted (" + plan.mime + ")");
+    return showUnplayable(() => t("this browser cannot play it converted ({})", plan.mime));
   }
   const s = {
     video, plan, source: new MSE(), buffer: null, appended: new Set(),
@@ -342,12 +343,24 @@ player.addEventListener("waiting", () => {
 
 // A video that cannot play says so, instead of a player that stays black
 // (behaviour#no-black-screen).
+// `reason` is what the server said, or a function writing the page's own
+// reason in the language in use, so a change of language writes it again.
+let unplayableReason = null;
+
 export function showUnplayable(reason) {
+  unplayableReason = reason;
   player.hidden = true;
   $("unplayable").hidden = false;
-  $("unplayable").textContent = "This video can't be played in the browser: " + reason;
+  writeUnplayable();
   notify("player");
 }
+
+function writeUnplayable() {
+  const reason = typeof unplayableReason === "function" ? unplayableReason() : fromServer(unplayableReason);
+  $("unplayable").textContent = t("This video can't be played in the browser: {}", reason);
+}
+
+listen("language", () => { if (!$("unplayable").hidden) writeUnplayable(); });
 
 // Loads `video` into the player with the sound track state.audio, from `at`
 // seconds of its own timeline, and plays it when `play`: a `direct` video

@@ -3,7 +3,8 @@
 
 import { $, el } from "./dom.js";
 import { getJSON, request } from "./api.js";
-import { state, notify, onWatch, currentRoute, watchHref, entryOf, byTitle, navigate, loadCatalogue } from "./state.js";
+import { t } from "./i18n.js";
+import { state, listen, notify, onWatch, currentRoute, watchHref, entryOf, byTitle, navigate, loadCatalogue } from "./state.js";
 
 const MAX_RESULTS = 8;     // entries in the search drop-down on watch
 
@@ -26,10 +27,10 @@ export function closeResults() {
 function matches(q) {
   const cat = state.catalogue;
   const playlists = cat.playlists.filter((p) => p.title.toLowerCase().includes(q)).sort(byTitle)
-    .map((p) => ({ title: p.title, id: entryOf(p), kind: p.series ? "Series" : "Playlist" }));
+    .map((p) => ({ title: p.title, id: entryOf(p), kind: t(p.series ? "Series" : "Playlist") }));
   const videos = cat.standalone.map((id) => cat.videos[id])
     .filter((v) => v.title.toLowerCase().includes(q)).sort(byTitle)
-    .map((v) => ({ title: v.title, id: v.id, kind: "Video" }));
+    .map((v) => ({ title: v.title, id: v.id, kind: t("Video") }));
   return [...playlists, ...videos].slice(0, MAX_RESULTS);
 }
 
@@ -41,7 +42,7 @@ export function showResults() {
     ? found.map((m) => el("li", {}, el("a", { href: watchHref(m.id) },
       el("span", { class: "result-title", text: m.title }),
       el("span", { class: "result-kind", text: m.kind }))))
-    : [el("li", { class: "empty", text: "Nothing found" })]));
+    : [el("li", { class: "empty", text: t("Nothing found") })]));
   results.hidden = false;
   search.setAttribute("aria-expanded", "true");
 }
@@ -136,6 +137,8 @@ document.addEventListener("click", (e) => {
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") closeQr();
 });
+
+listen("language", () => { if (!results.hidden) showResults(); });
 
 // ------------------------------------------------------------ resync_button
 

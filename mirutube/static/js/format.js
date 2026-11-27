@@ -1,6 +1,8 @@
 // What watch#details says of a file and of how it reaches the browser
 // (behaviour#what-plays), from /api/details: rows of a label and a text.
 
+import { t, tn, formatNumber, fromServer, language } from "./i18n.js";
+
 const CODECS = {
   h264: "H.264", hevc: "HEVC", h265: "HEVC", av1: "AV1", vp9: "VP9", vp8: "VP8",
   mpeg4: "MPEG-4", mpeg2video: "MPEG-2", mpeg1video: "MPEG-1", msmpeg4v3: "DivX", wmv3: "WMV",
@@ -20,13 +22,13 @@ export function formatSize(bytes) {
   const units = ["bytes", "KB", "MB", "GB", "TB"];
   let n = bytes, u = 0;
   while (n >= 1000 && u < units.length - 1) { n /= 1000; u++; }
-  return (u === 0 ? String(n) : n >= 100 ? n.toFixed(0) : n.toFixed(1)) + " " + units[u];
+  return formatNumber(n, u === 0 || n >= 100 ? 0 : 1) + " " + t(units[u]);
 }
 
 // `23.976 fps`
 export function formatRate(rate) {
   if (!rate || !isFinite(rate)) return "";
-  return String(Math.round(rate * 1000) / 1000) + " fps";
+  return t("{} fps", new Intl.NumberFormat(language(), { maximumFractionDigits: 3 }).format(rate));
 }
 
 // `stereo`, `5.1`, or `3 channels`.
@@ -35,19 +37,19 @@ export function channelsName(channels, layout) {
     const name = layout.replace(/\(.*\)$/, "");
     if (name) return name;
   }
-  if (channels === 1) return "mono";
-  if (channels === 2) return "stereo";
-  return channels ? `${channels} channels` : "";
+  if (channels === 1) return t("mono");
+  if (channels === 2) return t("stereo");
+  return channels ? tn(channels, "{} channel", "{} channels") : "";
 }
 
 // How the video reaches this browser.
 export function deliveryText(delivery) {
   if (!delivery) return "";
   switch (delivery.kind) {
-    case "direct": return "played as it is";
-    case "copy": return "sent in pieces — the video copied, the sound converted";
-    case "transcode": return "converted as it plays" + (delivery.encoder ? " — " + delivery.encoder : "");
-    case "unplayable": return "can't be played" + (delivery.reason ? ": " + delivery.reason : "");
+    case "direct": return t("played as it is");
+    case "copy": return t("sent in pieces — the video copied, the sound converted");
+    case "transcode": return delivery.encoder ? t("converted as it plays — {}", delivery.encoder) : t("converted as it plays");
+    case "unplayable": return delivery.reason ? t("can't be played: {}", fromServer(delivery.reason)) : t("can't be played");
     default: return delivery.kind;
   }
 }
@@ -62,13 +64,13 @@ export function detailsRows(details) {
   if (m) {
     const size = m.width && m.height ? `${m.width}×${m.height}` : "";
     const codec = [codecName(m.video_codec), m.profile].filter(Boolean).join(" ");
-    const video = join(size, formatRate(m.frame_rate), codec, m.bit_depth ? `${m.bit_depth}-bit` : "");
-    if (video) rows.push(["Video", video]);
+    const video = join(size, formatRate(m.frame_rate), codec, m.bit_depth ? t("{}-bit", m.bit_depth) : "");
+    if (video) rows.push([t("Video"), video]);
     const sound = join(codecName(m.audio_codec), channelsName(m.channels, m.layout));
-    if (sound) rows.push(["Sound", sound]);
+    if (sound) rows.push([t("Sound"), sound]);
     const file = join(m.container, formatSize(m.size));
-    if (file) rows.push(["File", file]);
+    if (file) rows.push([t("File"), file]);
   }
-  if (details && details.delivery) rows.push(["Plays", deliveryText(details.delivery)]);
+  if (details && details.delivery) rows.push([t("Plays"), deliveryText(details.delivery)]);
   return rows;
 }

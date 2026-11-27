@@ -883,7 +883,7 @@ class Server(unittest.TestCase):
         # applied on every device at once
         tv = self.events("dev-s1", "Living room TV")
         phone = self.events("dev-s2", "Phone")
-        self.assertEqual(tv.wait_topic("settings"), {"subtitle_size": 100, "seed_torrents": False})
+        self.assertEqual(tv.wait_topic("settings"), {"subtitle_size": 100, "seed_torrents": False, "language": "auto"})
         self.addCleanup(self.post, "/api/settings/shared", {"subtitle_size": 100})
         status, shared = self.post("/api/settings/shared", {"subtitle_size": 150})
         self.assertEqual((status, shared["subtitle_size"]), (200, 150))
@@ -891,6 +891,7 @@ class Server(unittest.TestCase):
             page.wait_topic("settings", lambda d: d["subtitle_size"] == 150)
         self.assertEqual(self.get_json("/api/settings")["shared"]["subtitle_size"], 150)
         for bad in ({"subtitle_size": 120}, {"subtitle_size": True}, {"seed_torrents": "yes"},
+                    {"language": "de"}, {"language": 1},
                     {"nothing": 1}, {"subtitle_size": 125, "nothing": 1}):
             self.assertEqual(self.post("/api/settings/shared", bad)[0], 400, bad)
         self.assertEqual(self.get_json("/api/settings")["shared"]["subtitle_size"], 150)  # none half-applied
