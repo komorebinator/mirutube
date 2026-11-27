@@ -1,4 +1,5 @@
 name: MiruTube
+version: 1.0.0
 description: "MiruTube — a video server for the home network: the computer that holds the videos serves them to every other device as a site in the style of a video-hosting service, with series in order, subtitles and dubs found by themselves, videos browsers cannot play converted as they play, and every device able to see and control what plays on the others. Written with duckspec, and its worked example."
 extends: "@DuckspecProject"
 terms_folder: MiruTube
