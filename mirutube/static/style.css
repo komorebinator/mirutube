@@ -119,18 +119,23 @@ button:disabled { cursor: default; opacity: 0.4; }
 .qr-image { display: block; width: 240px; height: 240px; margin: 0 auto; }
 .qr-address { margin: 12px 0 0; font-weight: 600; word-break: break-all; user-select: all; }
 
-/* upload_button: a ring around it fills with what is coming in */
-.upload-button { position: relative; }
-.upload-ring { position: absolute; inset: 0; width: 100%; height: 100%; transform: rotate(-90deg); pointer-events: none; }
-.upload-ring circle { fill: none; stroke-width: 2.5; }
-.upload-ring .ring-track { stroke: rgba(255, 255, 255, 0.12); }
-.upload-ring .ring-fill { stroke: var(--accent-light); stroke-linecap: round; transition: stroke-dashoffset 0.6s ease-out; }
-/* and a short bar just left of it fills with the same */
-.upload-progress {
-  flex: 0 0 auto; width: 32px; height: 4px; margin-right: 2px; border-radius: 2px; overflow: hidden;
-  background: rgba(255, 255, 255, 0.12);
+/* upload_button: while something comes in, a pill with no outline — a faint
+   light background filling from the left with what has come, and how long it
+   still needs before the icon, in a place as wide as the longest it says so
+   the pill keeps its width. All of it is the button, hovered and pressed as one. */
+.upload-left { display: none; min-width: 10.5ch; text-align: right; font-size: 14px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.top .upload-button.coming {
+  --fill: linear-gradient(to right, rgba(139, 92, 246, 0.38) var(--progress, 0%), rgba(255, 255, 255, 0.07) var(--progress, 0%));
+  width: auto; gap: 8px; padding: 0 9px 0 12px; border: 0; border-radius: 20px; background-image: var(--fill);
 }
-.upload-progress-fill { display: block; height: 100%; width: 0; background: var(--accent-light); transition: width 0.6s ease-out; }
+.top .upload-button.coming:hover:not(:disabled) { background-color: var(--surface-2); background-image: var(--fill); }
+.upload-button.coming .upload-left { display: inline-block; }
+/* on a phone there is no room for the text: the button stays round, and the
+   fill alone says how far it has got */
+@media (max-width: 600px) {
+  .top .upload-button.coming { width: 36px; gap: 0; padding: 0; border-radius: 50%; }
+  .upload-button.coming .upload-left { display: none; }
+}
 
 /* -------------------------------------------------------------------- views */
 

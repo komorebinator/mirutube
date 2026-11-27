@@ -14,7 +14,6 @@ import { t, tn, formatNumber, fromServer } from "./i18n.js";
 
 const PIECE = 8 * 1024 * 1024;   // bytes in one piece of a file
 const RETRY_AFTER = 3000;        // ms before a piece that did not get through is sent again
-const RING = 2 * Math.PI * 18;   // the length of upload_button's ring
 
 const card = $("uploads-card");
 const natural = (a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
@@ -72,6 +71,15 @@ const STATES = {
   done: "Done", failed: "Failed", cancelled: "Cancelled",
 };
 
+// How long everything coming in still needs, as upload_button says it.
+function shortTimeLeft(seconds) {
+  if (seconds < 60) return t("<1 min");
+  if (seconds < 3600) return t("{} min", formatNumber(Math.round(seconds / 60)));
+  let h = Math.floor(seconds / 3600), m = Math.round((seconds % 3600) / 60);
+  if (m === 60) { h += 1; m = 0; }
+  return m ? t("{} h {} min", formatNumber(h), formatNumber(m)) : t("{} h", formatNumber(h));
+}
+
 function timeLeft(seconds) {
   if (!seconds || !isFinite(seconds)) return "";
   if (seconds < 60) return t("less than a minute left");
@@ -121,18 +129,19 @@ function renderJobs() {
     $("jobs").replaceChildren(...jobs.map(jobItem));
     $("no-jobs").hidden = jobs.length > 0;
   }
-  // upload_button's ring and the bar beside it: the progress of everything
-  // coming in, on any device
+  // upload_button as a pill while anything is coming in, on any device: how
+  // long it all still needs — what is still to come over the speed it comes
+  // at — or how much has come while no speed is known, and the fill
   const coming = jobs.filter((j) => ["queued", "downloading", "interrupted"].includes(j.state));
   const size = coming.reduce((n, j) => n + (j.size || 0), 0);
   const done = coming.reduce((n, j) => n + Math.min(j.done || 0, j.size || 0), 0);
-  const ring = document.querySelector(".upload-ring");
-  ring.hidden = coming.length === 0;
-  const fill = $("upload-ring");
-  fill.style.strokeDasharray = String(RING);
-  fill.style.strokeDashoffset = String(RING * (1 - (size ? done / size : 0)));
-  document.querySelector(".upload-progress").hidden = coming.length === 0;
-  $("upload-progress").style.width = (size ? (100 * done / size).toFixed(1) : 0) + "%";
+  const speed = coming.reduce((n, j) => n + (j.state === "downloading" && j.speed > 0 ? j.speed : 0), 0);
+  const button = $("upload-button");
+  button.classList.toggle("coming", coming.length > 0);
+  button.style.setProperty("--progress", (size ? (100 * done / size).toFixed(1) : 0) + "%");
+  $("upload-left").textContent = !coming.length ? ""
+    : speed > 0 && size ? shortTimeLeft((size - done) / speed)
+      : formatNumber(size ? Math.floor(100 * done / size) : 0) + "%";
   $("upload-button").title = coming.length ? t("Upload · {} coming in", formatNumber(coming.length)) : t("Upload");
 }
 
