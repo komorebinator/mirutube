@@ -180,6 +180,9 @@ components:
             type: "@UserInterfaceElement"
             label: Settings
             description: A gear icon at the right end of the bar; opens settings.
+          - id: clock
+            type: "@UserInterfaceElement"
+            description: "The time, in hours and minutes as the language in use writes them, at the right end of the bar after settings_button, in the bar's own type, a little larger than address — there only while MiruTube itself fills the screen (behaviour#full-screen) on a window wider than it is tall and wider than about 900px: a TV or a computer in full screen hides the system's own clock, and someone across the room still wants to know the time. It keeps to the minute, and is gone on a phone and outside full screen, where the system shows the time already, and over a full-screen video, where top_bar is not shown at all."
       - id: install_card
         type: "@UserInterfaceElement"
         label: Install MiruTube
@@ -541,7 +544,7 @@ behaviour:
         when: Connect a device is pressed and its code is scanned with a phone's camera
         then: the phone opens MiruTube and shows in the devices list
   - id: full-screen
-    description: "Full screen means what the moment needs: while a video plays on this device it fills the screen with the video, and the control bar shows over it when the pointer moves and hides again; anywhere else it fills the screen with MiruTube itself, for a TV across the room. A page stays in full screen as it goes from view to view, so a TV put in full screen once shows every video sent to it filling the screen, and the press counts as the touch that lets it play with sound (behaviour#devices). The button is on every device's bar, whatever the bar shows, and always acts on the page it is pressed on, never on another device: a browser goes full screen only from a touch on its own page (decisions#fullscreen-here)."
+    description: "Full screen means what the moment needs: while a video plays on this device it fills the screen with the video, and the control bar shows over it when the pointer moves and hides again; anywhere else it fills the screen with MiruTube itself, for a TV across the room, with the time in the top right corner on a wide screen, since full screen hides the system's own clock (top_bar#components#clock). A page stays in full screen as it goes from view to view, so a TV put in full screen once shows every video sent to it filling the screen, and the press counts as the touch that lets it play with sound (behaviour#devices). The button is on every device's bar, whatever the bar shows, and always acts on the page it is pressed on, never on another device: a browser goes full screen only from a touch on its own page (decisions#fullscreen-here)."
     scenarios:
       - id: video
         given: an episode plays on the laptop
@@ -555,6 +558,10 @@ behaviour:
         given: home is open on the TV and nothing plays there
         when: full screen is pressed
         then: MiruTube fills the TV's screen without the browser around it
+      - id: clock
+        given: home is open in full screen on the TV
+        when: the top bar is looked at, and then an episode starts playing there
+        then: the time is in the top right corner while home is shown, and gone while the episode fills the screen
       - id: ready-on-tv
         given: MiruTube was opened on the TV and put in full screen from home, and nothing else on it was touched
         when: an episode is moved to the TV from a phone
@@ -857,7 +864,7 @@ tests:
       - behaviour#uploads
       - behaviour#library-only
   - id: browser
-    description: "runs image as tests#container does and opens its page in headless Chromium, from a container of its own, as two devices: playback moved from one to the other goes on from the same moment as loud and as fast, and the first goes back to home; a device that sent its video away keeps acting on it and can bring it back; a device never touched leaves a video sent to it paused, and plays it with sound once touched; full screen pressed on home stays as videos come, with the full screen button on every device; subtitles are drawn above the bar while it shows over a full-screen video and grow with Subtitle size set on the other device; Continue watching on one device follows an episode finished on the other; files chosen on the page upload into the library; a browser preferring Russian shows the page in Russian until a language is chosen, and Russian chosen in settings on one device turns the other's page Russian, a refusal from the server included"
+    description: "runs image as tests#container does and opens its page in headless Chromium, from a container of its own, as two devices: playback moved from one to the other goes on from the same moment as loud and as fast, and the first goes back to home; a device that sent its video away keeps acting on it and can bring it back; a device never touched leaves a video sent to it paused, and plays it with sound once touched; full screen pressed on home stays as videos come, with the full screen button on every device, and shows the clock on home and not over the video; subtitles are drawn above the bar while it shows over a full-screen video and grow with Subtitle size set on the other device; Continue watching on one device follows an episode finished on the other; files chosen on the page upload into the library; a browser preferring Russian shows the page in Russian until a language is chosen, and Russian chosen in settings on one device turns the other's page Russian, a refusal from the server included"
     command: python -m unittest tests.test_browser
     verifies:
       - behaviour#devices

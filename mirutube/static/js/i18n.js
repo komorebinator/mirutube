@@ -394,6 +394,11 @@ export function formatNumber(n, digits = 0) {
   return new Intl.NumberFormat(lang, { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(n);
 }
 
+// The time of day in hours and minutes, as the language writes it.
+export function formatClock(date = new Date()) {
+  return date.toLocaleTimeString(lang === "ru" ? "ru-RU" : "en-US", { hour: "numeric", minute: "2-digit" });
+}
+
 // ------------------------------------------------------------ index.html
 
 // The words of index.html, read once as written — in English — before any

@@ -1,9 +1,9 @@
 """tests#browser: the image under test (tests/image.py) run as service runs
 it, and its page used in headless Chromium — from tests/browser, a container
 of its own — as devices, each a browser context of its own: moving playback
-and what comes with it, a device never touched, full screen, subtitles above
-the bar and their size, Continue watching following another device, an
-upload from the page, and the household's language.
+and what comes with it, a device never touched, full screen and its clock,
+subtitles above the bar and their size, Continue watching following another
+device, an upload from the page, and the household's language.
 
 Needs Podman; skipped where there is none."""
 
@@ -195,10 +195,16 @@ class Page(unittest.TestCase):
         tv, phone = self.device("TV full"), self.device("Phone full")
         tv.click("#fullscreen-button")
         tv.wait("!!document.fullscreenElement", message="full screen did not start from home")
+        # behaviour#full-screen#scenarios#clock: the time on home, none over the video
+        clock = "getComputedStyle(document.getElementById('clock')).display !== 'none'"
+        tv.wait(clock + " && /\\d:\\d\\d/.test(document.getElementById('clock').textContent)",
+                message="the clock is not shown on home in full screen")
+        self.assertFalse(phone.eval(clock), "the clock is shown outside full screen")
         self.play_here(phone, EP[0])
         self.move(phone, "TV full")
         tv.wait("document.body.classList.contains('video-full') && !document.getElementById('player').paused",
                 message="the video sent did not fill the TV's screen")
+        self.assertFalse(tv.eval(clock), "the clock is shown over the video")
         # on the phone the bar acts on the TV and still offers full screen, for the phone
         phone.wait("document.getElementById('np-where').textContent.includes('TV full')")
         self.assertFalse(phone.eval("document.getElementById('fullscreen-button').hidden"))

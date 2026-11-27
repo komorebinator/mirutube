@@ -3,7 +3,7 @@
 
 import { $, el } from "./dom.js";
 import { getJSON, request } from "./api.js";
-import { t } from "./i18n.js";
+import { t, formatClock } from "./i18n.js";
 import { state, listen, notify, onWatch, currentRoute, watchHref, entryOf, byTitle, navigate, loadCatalogue } from "./state.js";
 
 const MAX_RESULTS = 8;     // entries in the search drop-down on watch
@@ -139,6 +139,19 @@ document.addEventListener("keydown", (e) => {
 });
 
 listen("language", () => { if (!results.hidden) showResults(); });
+
+// -------------------------------------------------------------------- clock
+
+// The time, kept to the minute. CSS shows it only while MiruTube itself
+// fills a wide, landscape screen (behaviour#full-screen), where the system's
+// own clock is hidden; over a full-screen video top_bar is not shown at all.
+function tick() {
+  const now = new Date();
+  $("clock").textContent = formatClock(now);
+  setTimeout(tick, 60000 - (now.getSeconds() * 1000 + now.getMilliseconds()) + 50);
+}
+tick();
+listen("language", () => { $("clock").textContent = formatClock(); });
 
 // ------------------------------------------------------------ resync_button
 
