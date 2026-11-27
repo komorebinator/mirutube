@@ -627,7 +627,7 @@ class Downloads:
         with self._lock:
             torrents = [(j, self.live.get(j["id"], {}).get("handle")) for j in self.jobs.values()
                         if j["kind"] == "torrent" and j["state"] in ("downloading", "seeding")]
-        seed = bool(self.settings().get("seed_torrents", True))
+        seed = bool(self.settings().get("seed_torrents", False))
         for job, handle in torrents:
             if handle is None or not handle.is_valid():
                 continue

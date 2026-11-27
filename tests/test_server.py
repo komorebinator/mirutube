@@ -883,7 +883,7 @@ class Server(unittest.TestCase):
         # applied on every device at once
         tv = self.events("dev-s1", "Living room TV")
         phone = self.events("dev-s2", "Phone")
-        self.assertEqual(tv.wait_topic("settings"), {"subtitle_size": 100, "seed_torrents": True})
+        self.assertEqual(tv.wait_topic("settings"), {"subtitle_size": 100, "seed_torrents": False})
         self.addCleanup(self.post, "/api/settings/shared", {"subtitle_size": 100})
         status, shared = self.post("/api/settings/shared", {"subtitle_size": 150})
         self.assertEqual((status, shared["subtitle_size"]), (200, 150))

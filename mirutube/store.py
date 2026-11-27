@@ -13,11 +13,13 @@ import sqlite3
 import time
 
 # store#fields#shared_settings: each setting with its default and what it may
-# be set to (behaviour#subtitle-size, downloads#functions#torrent)
+# be set to (behaviour#subtitle-size, downloads#functions#torrent). Seeding is
+# off until the user turns it on: it sends the household's upload to strangers
+# for as long as MiruTube runs.
 SUBTITLE_SIZES = (75, 100, 125, 150, 200)
 SHARED_SETTINGS = {
     "subtitle_size": (100, lambda v: not isinstance(v, bool) and v in SUBTITLE_SIZES),
-    "seed_torrents": (True, lambda v: isinstance(v, bool)),
+    "seed_torrents": (False, lambda v: isinstance(v, bool)),
 }
 
 SCHEMA = """

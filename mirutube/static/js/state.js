@@ -14,7 +14,7 @@ export const state = {
   subtitle: null,    // the subtitle track shown, one of current.subtitles, or null
   arriving: null,    // {video, position, audio, subtitle, volume, speed}: playback moving here, until watch shows it
   sentTo: null,      // the device this one sent the video on screen to, which the bar then acts on
-  shared: { subtitle_size: 100, seed_torrents: true }, // page#fields#shared_settings, as the server last sent them
+  shared: { subtitle_size: 100, seed_torrents: false }, // page#fields#shared_settings, as the server last sent them
   jobs: [],          // page#fields#jobs: what is coming into the library, as the server last sent it
 };
 
