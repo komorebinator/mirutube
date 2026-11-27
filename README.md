@@ -11,11 +11,12 @@ A video server for the home network. MiruTube runs on the computer that holds yo
 - **Continue where you stopped,** on any device: positions are kept by the server, one card per series.
 - **Bring videos in from any device.** Drop files or a whole folder onto the page, or paste a link to a video or a playlist. What is watched first comes first: the first episode plays while the rest arrive, a new episode joins its series by itself, and every device sees what is on its way.
 - **Subtitles sized for the screen.** They keep the same proportion to the picture on a phone and on a TV across the room, and one setting makes them larger or smaller on every device at once.
+- **English and Russian.** One language for the whole household, chosen in settings; until then each browser shows its own.
 - **Connect by QR code,** and install MiruTube as an app on a phone or a computer.
 
 ## Install
 
-MiruTube runs on Linux as a container in your user's systemd, through Podman's Quadlet. It needs systemd and Podman 4.4 or newer — Fedora, Ubuntu 24.04, Debian 13, Arch and openSUSE have it; Debian 12 and Ubuntu 22.04 are too old.
+MiruTube runs on Linux as a container in your user's systemd, through Podman's Quadlet. It needs systemd and Podman 5.1 or newer — Fedora, Debian 13, Ubuntu 25.04 and later, Arch and openSUSE Tumbleweed have it; Ubuntu 24.04 and Debian 12 are too old, and there `systemctl --user start mirutube` answers that the unit is not found.
 
 ```sh
 mkdir -p ~/.config/containers/systemd
@@ -26,7 +27,7 @@ systemctl --user start mirutube
 systemctl --user enable --now podman-auto-update.timer    # keep MiruTube up to date
 ```
 
-Then open `http://localhost:8800` on that computer, go to **Settings** and add the folders with your videos — any folder you can read, on any disk, by its usual path. Other devices open the address shown at the top left, beside the logo, or scan its QR code. The first start downloads the image, about 240 MB.
+Then open `http://localhost:8800` on that computer, go to **Settings** and add the folders with your videos — any folder you can read, on any disk, by its usual path. Other devices open the address shown at the top left, beside the logo, or scan its QR code. The first start downloads the image, about 290 MB.
 
 MiruTube starts whenever you log in. Intel and AMD GPUs convert video with nothing more to do; the video details under a playing video say which encoder is used.
 
